@@ -42,6 +42,10 @@ async function init() {
   linksFilter.hideNoise = settings.hideNoiseByDefault ?? true;
   els.toggleHighlight.checked = settings.highlightEnabled ?? false;
   renderEmpty();
+
+  // 交互优化：打开插件弹窗时，默认自动触发一次分析（失败不影响手动 Analyze 重试）
+  // 注意：Chrome 限制页面（如 Chrome Web Store / 设置页）会返回错误提示
+  runAnalyze();
 }
 
 function wireTabs() {
