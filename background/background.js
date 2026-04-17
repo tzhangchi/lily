@@ -203,6 +203,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
+// ===== Side Panel（全高度展开）=====
+// 说明：Chrome action popup 有高度上限；使用 sidePanel 才能实现类似截图的“固定宽度 + h-screen”体验。
+try {
+  chrome.runtime.onInstalled?.addListener(() => {
+    // 新版 Chrome 支持：点击扩展图标自动打开 side panel
+    chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
+  });
+
+  // 兼容：如果 setPanelBehavior 不可用，则用 onClicked 手动打开
+  chrome.action?.onClicked?.addListener(async (tab) => {
+    try {
+      if (tab?.windowId != null) await chrome.sidePanel?.open?.({ windowId: tab.windowId });
+    } catch {
+      // ignore
+    }
+  });
+} catch {
+  // ignore
+}
+
 async function aiEnhance(analysis, settings) {
   const base = (settings.aiServerUrl || "").replace(/\/+$/, "");
   if (!base) throw new Error("aiServerUrl missing");

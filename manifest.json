@@ -5,11 +5,13 @@
   "version": "0.1.0",
   "description": "发现页面里的外链机会：外链/竞品/商业痕迹/机会评分，并可保存与导出。",
   "action": {
-    "default_title": "Link Radar",
-    "default_popup": "popup/popup.html"
+    "default_title": "Link Radar"
+  },
+  "side_panel": {
+    "default_path": "panel/panel.html"
   },
   "options_page": "options/options.html",
-  "permissions": ["storage", "activeTab", "tabs", "downloads"],
+  "permissions": ["storage", "activeTab", "tabs", "downloads", "sidePanel"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background/background.js",
