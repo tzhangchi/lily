@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Link Radar Settings</title>
+    <style>
+      :root {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f5f5f7;
+        --text-primary: #1d1d1f;
+        --text-secondary: #6e6e73;
+        --border: rgba(0, 0, 0, 0.1);
+        --accent-blue: #0071e3;
+        --accent-red: #ff3b30;
+        --accent-green: #30d158;
+        --glass: rgba(255, 255, 255, 0.78);
+        --shadow: 0 12px 40px rgba(0, 0, 0, 0.10);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-primary: #000000;
+          --bg-secondary: #1d1d1f;
+          --text-primary: #f5f5f7;
+          --text-secondary: #a1a1a6;
+          --border: rgba(255, 255, 255, 0.14);
+          --accent-blue: #0a84ff;
+          --accent-red: #ff453a;
+          --accent-green: #30d158;
+          --glass: rgba(28, 28, 30, 0.72);
+          --shadow: 0 16px 50px rgba(0, 0, 0, 0.45);
+        }
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        padding: 22px;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui, "PingFang SC",
+          "Microsoft YaHei", Arial, sans-serif;
+        background: radial-gradient(1400px 700px at -10% -10%, rgba(0, 113, 227, 0.18), transparent 60%),
+          radial-gradient(900px 500px at 120% 0%, rgba(48, 209, 88, 0.12), transparent 55%),
+          var(--bg-secondary);
+        color: var(--text-primary);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      .card {
+        max-width: 820px;
+        margin: 0 auto;
+        background: var(--glass);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: 18px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+      }
+      h1 { font-size: 20px; margin: 0 0 10px; letter-spacing: -0.01em; }
+      .muted { color: var(--text-secondary); font-size: 13px; }
+      label { display: block; margin-top: 14px; font-size: 13px; color: var(--text-primary); }
+      input, textarea, select {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.55);
+        color: var(--text-primary);
+        outline: none;
+        margin-top: 8px;
+      }
+      @media (prefers-color-scheme: dark) {
+        input, textarea, select { background: rgba(255,255,255,0.06); }
+      }
+      textarea { min-height: 140px; resize: vertical; }
+      .row { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+      .btn {
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.65);
+        color: var(--text-primary);
+        padding: 10px 14px;
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: transform 220ms ease, box-shadow 220ms ease;
+      }
+      @media (prefers-color-scheme: dark) { .btn { background: rgba(255,255,255,0.06); } }
+      .btn:hover { transform: translateY(-1px); box-shadow: 0 10px 28px rgba(0,0,0,0.12); }
+      .btn-primary { background: var(--accent-blue); border-color: rgba(0, 113, 227, 0.35); color: #fff; }
+      .ok { color: var(--accent-green); }
+      .err { color: var(--accent-red); }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Link Radar 设置（V1）</h1>
+      <div class="muted">尽量少配置：只需要你的产品关键词 + 竞品关键词，其他有默认值。</div>
+
+      <label>我的产品关键词（逗号分隔）</label>
+      <input id="myProduct" placeholder="例如：LlamaGen, Llama Gen, llamagen.ai" />
+
+      <label>竞品关键词（逗号分隔）</label>
+      <textarea id="competitors" placeholder="例如：Midjourney, Runway, Kling, Dashtoon"></textarea>
+
+      <div class="row">
+        <label style="flex:1;">
+          默认范围
+          <select id="defaultScope">
+            <option value="content">只看正文</option>
+            <option value="all">看全部</option>
+          </select>
+        </label>
+        <label style="flex:1;">
+          默认隐藏噪音
+          <select id="hideNoise">
+            <option value="1">是</option>
+            <option value="0">否</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row">
+        <button id="btnSave" class="btn btn-primary">保存</button>
+        <button id="btnReset" class="btn">恢复默认</button>
+        <div id="status" class="muted"></div>
+      </div>
+    </div>
+
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>
