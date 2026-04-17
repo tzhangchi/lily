@@ -100,7 +100,31 @@ async function analyzeActiveTab() {
   const tab = await getActiveTab();
   const settings = await getSettings();
 
-  const result = await chrome.tabs.sendMessage(tab.id, { type: "LR_ANALYZE_PAGE", settings });
+  let result;
+  try {
+    result = await chrome.tabs.sendMessage(tab.id, { type: "LR_ANALYZE_PAGE", settings });
+  } catch (e) {
+    const msg = e?.message || String(e);
+    const url = tab.url || "";
+    const restricted =
+      url.startsWith("chrome://") ||
+      url.startsWith("edge://") ||
+      url.startsWith("about:") ||
+      url.startsWith("chrome-extension://") ||
+      url.startsWith("https://chrome.google.com/webstore") ||
+      url.startsWith("https://chromewebstore.google.com/");
+
+    // 关键：Receiving end does not exist => 目标页面没有注入 content script
+    if (/Receiving end does not exist|Could not establish connection/i.test(msg)) {
+      console.warn("[Lily] sendMessage failed (no receiver). url=", url, "restricted=", restricted, "err=", msg);
+      if (restricted) {
+        throw new Error("这是 Chrome 限制页面，内容脚本无法运行（请在普通网页使用）。");
+      }
+      throw new Error("内容脚本未就绪/未注入：请刷新页面后再试（或重新打开该标签页）。");
+    }
+    console.warn("[Lily] sendMessage failed. url=", url, "err=", msg);
+    throw new Error(msg);
+  }
   // AI 增强（可选）：失败不影响主流程
   if (settings.aiEnabled) {
     try {

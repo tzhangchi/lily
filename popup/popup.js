@@ -105,7 +105,15 @@ async function runAnalyze() {
     renderChips();
     renderAll();
   } catch (e) {
-    renderError(e?.message || String(e));
+    const msg = e?.message || String(e);
+    // 交互优化：刚打开 popup 时，content script 可能尚未注入（页面未刷新/刚装扩展/刚跳转）
+    if (/未就绪|未注入|Receiving end does not exist|Could not establish connection/i.test(msg) && !runAnalyze._retried) {
+      runAnalyze._retried = true;
+      await new Promise((r) => setTimeout(r, 900));
+      return runAnalyze();
+    }
+    runAnalyze._retried = false;
+    renderError(msg);
   } finally {
     setBusy(false);
   }
@@ -173,7 +181,13 @@ function renderError(msg) {
     <div class="card">
       <h3>无法分析</h3>
       <div class="muted error">${escapeHtml(msg)}</div>
-      <div class="muted" style="margin-top:8px;">如果是 Chrome 限制页面（如 Chrome Web Store、设置页），内容脚本无法运行。</div>
+      <div class="muted" style="margin-top:10px;">
+        可能原因：
+        <ul style="margin:6px 0 0 18px; padding:0;">
+          <li>Chrome 限制页面（Chrome Web Store、设置页等）——内容脚本无法运行</li>
+          <li>普通网页但提示 “Receiving end does not exist / Could not establish connection” ——通常是内容脚本未注入：请刷新页面（Cmd/Ctrl+R）后再点插件</li>
+        </ul>
+      </div>
     </div>
   `;
 }
