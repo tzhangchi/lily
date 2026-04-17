@@ -101,6 +101,15 @@ async function analyzeActiveTab() {
   const settings = await getSettings();
 
   const result = await chrome.tabs.sendMessage(tab.id, { type: "LR_ANALYZE_PAGE", settings });
+  // AI 增强（可选）：失败不影响主流程
+  if (settings.aiEnabled) {
+    try {
+      const ai = await aiEnhance(result, settings);
+      return { ...result, ai };
+    } catch {
+      // ignore
+    }
+  }
   return result;
 }
 
@@ -169,3 +178,51 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 告诉 Chrome：我们会异步调用 sendResponse
   return true;
 });
+
+async function aiEnhance(analysis, settings) {
+  const base = (settings.aiServerUrl || "").replace(/\/+$/, "");
+  if (!base) throw new Error("aiServerUrl missing");
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 18_000);
+  try {
+    // 控制 payload：只取前 30 条链接
+    const slim = {
+      url: analysis.url,
+      title: analysis.title,
+      domain: analysis.domain,
+      pageType: analysis.pageType,
+      score: analysis.score,
+      totalLinks: analysis.totalLinks,
+      contentLinks: analysis.contentLinks,
+      competitorMentions: analysis.competitorMentions,
+      commercialSignals: analysis.commercialSignals,
+      seo: analysis.seo,
+      textSample: analysis.textSample,
+      links: (analysis.links || []).slice(0, 30).map((l) => ({
+        url: l.url,
+        domain: l.domain,
+        anchorText: l.anchorText,
+        location: l.location,
+        category: l.category,
+        isCompetitor: l.isCompetitor,
+        isNofollow: l.isNofollow,
+        isSponsored: l.isSponsored,
+        contextText: l.contextText
+      }))
+    };
+
+    const res = await fetch(`${base}/api/analyze`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ analysis: slim, model: settings.aiModel || "gpt-4.1" }),
+      signal: controller.signal
+    });
+    if (!res.ok) throw new Error(`ai server http ${res.status}`);
+    const json = await res.json();
+    if (!json?.ok) throw new Error(json?.error || "ai server error");
+    return json.ai;
+  } finally {
+    clearTimeout(timer);
+  }
+}

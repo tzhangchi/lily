@@ -178,12 +178,24 @@ function renderOverview() {
   if (!analysis) return renderEmpty();
   const nextAction = suggestNextAction(analysis);
   const topProducts = (analysis.links || []).slice(0, 5);
+  const ai = analysis.ai || null;
 
   els.panelOverview.innerHTML = `
     <div class="card">
       <h3>一句话总结</h3>
-      <div>${escapeHtml(analysis.summary || "")}</div>
+      <div>${escapeHtml(ai?.summary || analysis.summary || "")}</div>
     </div>
+
+    ${
+      ai?.conversionChecklist?.length
+        ? `
+      <div class="card">
+        <h3>转化页要素（AI Checklist）</h3>
+        ${renderBullets(ai.conversionChecklist)}
+      </div>
+    `
+        : ""
+    }
 
     <div class="card">
       <h3>关键指标</h3>
@@ -394,11 +406,22 @@ function wireAccordion() {
 
 function renderInsights() {
   if (!analysis) return renderEmpty();
+  const ai = analysis.ai || null;
   els.panelInsights.innerHTML = `
     <div class="card">
       <h3>洞察（3-5 条）</h3>
       ${renderBullets(analysis.insights || [])}
     </div>
+    ${
+      ai?.insights?.length
+        ? `
+      <div class="card">
+        <h3>洞察（AI）</h3>
+        ${renderBullets(ai.insights)}
+      </div>
+    `
+        : ""
+    }
     <div class="card">
       <h3>证据</h3>
       <div class="muted">页面类型：<b>${escapeHtml(analysis.pageType)}</b></div>
@@ -415,6 +438,7 @@ function renderSeo() {
   const kws = seo.keywordDensity?.top || [];
   const serp = seo.serp || {};
   const social = seo.social || {};
+  const ai = analysis.ai || null;
 
   const levelBadge = (lvl) => {
     if (lvl === "error") return `<span class="badge badge-red">error</span>`;
@@ -486,6 +510,19 @@ function renderSeo() {
         ${(serp.searchLinks || [])
           .map((l, idx) => `<button class="btn btn-ghost" data-seo-open="${escapeHtmlAttr(l.url)}">${escapeHtml(idx === 0 ? "查布局/示例" : "Google")}</button>`)
           .join("")}
+        ${
+          (ai?.serpQueries || []).length
+            ? (ai.serpQueries || [])
+                .slice(0, 4)
+                .map((q) => {
+                  const label = `AI: ${(q || "").toString().slice(0, 12)}${(q || "").length > 12 ? "…" : ""}`;
+                  return `<button class="btn btn-ghost" data-seo-open="${escapeHtmlAttr(
+                    `https://www.google.com/search?q=${encodeURIComponent(q)}`
+                  )}">${escapeHtml(label)}</button>`;
+                })
+                .join("")
+            : ""
+        }
       </div>
       <div class="muted" style="margin-top:6px;">提示：带着好奇心去搜“落地页布局/竞品/alternatives”，观察别人怎么写 H1、结构、CTA、FAQ。</div>
     </div>

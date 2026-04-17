@@ -104,6 +104,29 @@
       <label>竞品关键词（逗号分隔）</label>
       <textarea id="competitors" placeholder="例如：Midjourney, Runway, Kling, Dashtoon"></textarea>
 
+      <hr style="margin:18px 0; border:none; border-top:1px solid var(--border);" />
+      <h2 style="font-size:14px; margin:0 0 8px;">AI（可选）</h2>
+      <div class="muted">可接入 Azure OpenAI 做摘要/更精确分类；关闭时插件完全离线可用。</div>
+
+      <div class="row" style="margin-top:10px;">
+        <label style="flex:1;">
+          启用 AI
+          <select id="aiEnabled">
+            <option value="0">否（推荐默认）</option>
+            <option value="1">是</option>
+          </select>
+        </label>
+        <label style="flex:1;">
+          默认模型
+          <select id="aiModel">
+            <option value="gpt-4.1">gpt-4.1</option>
+            <option value="gpt-5.2">gpt-5.2</option>
+          </select>
+        </label>
+      </div>
+      <label style="margin-top:10px;">AI 服务地址（Next.js 进程）</label>
+      <input id="aiServerUrl" placeholder="例如：http://localhost:3000" />
+
       <div class="row">
         <label style="flex:1;">
           默认范围

@@ -3,7 +3,12 @@ export const DEFAULT_SETTINGS = {
   competitorKeywords: ["Midjourney", "Runway", "Kling", "Dashtoon"],
   hideNoiseByDefault: true,
   defaultScope: "content", // all | content
-  highlightEnabled: false
+  highlightEnabled: false,
+
+  // AI（可选）：默认关闭，插件在无 AI 环境下照常工作
+  aiEnabled: false,
+  aiServerUrl: "http://localhost:3000", // Next.js 服务进程地址
+  aiModel: "gpt-4.1" // 支持：gpt-4.1 / gpt-5.2（按服务端部署名映射）
 };
 
 // 常见“追踪/投放”参数：V1 规则版（可扩展）
@@ -56,4 +61,3 @@ export const NOISE_ANCHOR_KEYWORDS = [
   "cookie",
   "policy"
 ];
-

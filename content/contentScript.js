@@ -328,6 +328,8 @@ function analyzeLinks(settings) {
   });
 
   const seo = analyzeSeo({ pageUrl, title });
+  // 给 AI 使用的文本样本（避免 payload 过大）
+  const textSample = getSeoText().slice(0, 12_000);
 
   // 排序：正文优先，产品/affiliate/competitor 再优先
   links.sort((a, b) => {
@@ -360,6 +362,7 @@ function analyzeLinks(settings) {
     summary,
     insights,
     seo,
+    textSample,
     analyzedAt: new Date().toISOString(),
     links
   };

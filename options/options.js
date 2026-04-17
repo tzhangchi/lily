@@ -5,6 +5,9 @@ const elComp = document.getElementById("competitors");
 const elScope = document.getElementById("defaultScope");
 const elNoise = document.getElementById("hideNoise");
 const elStatus = document.getElementById("status");
+const elAiEnabled = document.getElementById("aiEnabled");
+const elAiServerUrl = document.getElementById("aiServerUrl");
+const elAiModel = document.getElementById("aiModel");
 
 init();
 
@@ -18,6 +21,9 @@ async function init() {
       ...s,
       myProductKeywords: splitCsv(elMy.value),
       competitorKeywords: splitCsv(elComp.value),
+      aiEnabled: elAiEnabled.value === "1",
+      aiServerUrl: (elAiServerUrl.value || "").trim(),
+      aiModel: elAiModel.value,
       defaultScope: elScope.value,
       hideNoiseByDefault: elNoise.value === "1"
     };
@@ -38,6 +44,9 @@ async function init() {
 function fill(s) {
   elMy.value = (s.myProductKeywords || []).join(", ");
   elComp.value = (s.competitorKeywords || []).join(", ");
+  elAiEnabled.value = s.aiEnabled ? "1" : "0";
+  elAiServerUrl.value = s.aiServerUrl || "http://localhost:3000";
+  elAiModel.value = s.aiModel || "gpt-4.1";
   elScope.value = s.defaultScope || "content";
   elNoise.value = s.hideNoiseByDefault ? "1" : "0";
 }
@@ -54,4 +63,3 @@ function show(text, ok) {
   elStatus.className = ok ? "muted ok" : "muted err";
   setTimeout(() => (elStatus.textContent = ""), 2000);
 }
-
