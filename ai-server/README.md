@@ -22,8 +22,12 @@ npm run dev
 AZURE_OPENAI_AZURE_ENDPOINT="https://xxxx.openai.azure.com"
 AZURE_OPENAI_API_KEY="xxxxxxxx"
 
-# 可选：API 版本
-AZURE_OPENAI_API_VERSION="2024-02-15-preview"
+# 可选：API 版本（全局默认）
+AZURE_OPENAI_API_VERSION="2024-12-01-preview"
+
+# 可选：按 model 单独覆盖 API 版本（优先级高于全局）
+# AZURE_OPENAI_API_VERSION_GPT_4_1="2024-12-01-preview"
+# AZURE_OPENAI_API_VERSION_GPT_5_2="2024-12-01-preview"
 
 # 可选：当你的 Azure Deployment 名称 != 模型名时，用下面映射
 # AZURE_OPENAI_DEPLOYMENT_GPT_4_1="你的部署名"
@@ -58,4 +62,3 @@ AZURE_OPENAI_API_VERSION="2024-02-15-preview"
 ```json
 { "ok": true, "ai": { "summary": "...", "conversionChecklist": [] } }
 ```
-

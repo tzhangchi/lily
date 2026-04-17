@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 
-const DEFAULT_API_VERSION = "2024-02-15-preview";
+// 你给的示例使用 2024-12-01-preview，这里作为默认值（也可按 model 单独覆盖）
+const DEFAULT_API_VERSION = "2024-12-01-preview";
 
 function getEnvEndpoint() {
   // 兼容你给的变量名（末尾多了 I）
@@ -10,6 +11,10 @@ function getEnvEndpoint() {
 
 function modelToEnvKey(model) {
   return `AZURE_OPENAI_DEPLOYMENT_${String(model).replace(/[^a-z0-9]+/gi, "_").toUpperCase()}`;
+}
+
+function apiVersionToEnvKey(model) {
+  return `AZURE_OPENAI_API_VERSION_${String(model).replace(/[^a-z0-9]+/gi, "_").toUpperCase()}`;
 }
 
 function corsHeaders() {
@@ -32,12 +37,13 @@ export async function POST(req) {
 
     const endpoint = getEnvEndpoint();
     const apiKey = process.env.AZURE_OPENAI_API_KEY || "";
-    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || DEFAULT_API_VERSION;
+    const modelName = model || "gpt-4.1";
+    const apiVersion =
+      process.env[apiVersionToEnvKey(modelName)] || process.env.AZURE_OPENAI_API_VERSION || DEFAULT_API_VERSION;
 
     if (!endpoint) return Response.json({ ok: false, error: "missing AZURE_OPENAI_AZURE_ENDPOINT" }, { status: 500, headers: corsHeaders() });
     if (!apiKey) return Response.json({ ok: false, error: "missing AZURE_OPENAI_API_KEY" }, { status: 500, headers: corsHeaders() });
 
-    const modelName = model || "gpt-4.1";
     const deployment =
       process.env[modelToEnvKey(modelName)] ||
       process.env.AZURE_OPENAI_DEPLOYMENT ||
@@ -179,4 +185,3 @@ function normalizeAi(ai) {
     serpQueries: Array.isArray(ai.serpQueries) ? ai.serpQueries.slice(0, 8) : []
   };
 }
-
