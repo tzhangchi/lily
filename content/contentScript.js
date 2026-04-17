@@ -157,27 +157,49 @@ function injectHighlightCssOnce() {
   const style = document.createElement("style");
   style.id = "lr-highlight-style";
   style.textContent = `
+    :root {
+      --lr-accent: #0071e3;
+      --lr-border: rgba(0,0,0,0.10);
+      --lr-shadow: 0 18px 48px rgba(0,0,0,0.18);
+      --lr-glass: rgba(255,255,255,0.82);
+      --lr-text: #1d1d1f;
+      --lr-muted: #6e6e73;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --lr-accent: #0a84ff;
+        --lr-border: rgba(255,255,255,0.16);
+        --lr-shadow: 0 22px 60px rgba(0,0,0,0.52);
+        --lr-glass: rgba(28,28,30,0.78);
+        --lr-text: #f5f5f7;
+        --lr-muted: #a1a1a6;
+      }
+    }
     .lr-highlighted-link {
-      outline: 2px solid #5B8CFF !important;
+      outline: 2px solid var(--lr-accent) !important;
       outline-offset: 2px !important;
-      border-radius: 3px !important;
-      background: rgba(91, 140, 255, 0.08) !important;
+      border-radius: 6px !important;
+      background: color-mix(in srgb, var(--lr-accent) 12%, transparent) !important;
     }
     .lr-tooltip {
       position: fixed;
       z-index: 2147483647;
       max-width: 420px;
-      padding: 10px 12px;
-      background: rgba(20,20,20,0.92);
-      color: #fff;
+      padding: 12px 14px;
+      background: var(--lr-glass);
+      color: var(--lr-text);
       font-size: 12px;
       line-height: 1.4;
-      border-radius: 8px;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+      border-radius: 16px;
+      border: 1px solid var(--lr-border);
+      box-shadow: var(--lr-shadow);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
       pointer-events: none;
       white-space: pre-wrap;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
     }
-    .lr-tooltip .lr-tip-meta { opacity: 0.85; margin-top: 6px; font-size: 11px; }
+    .lr-tooltip .lr-tip-meta { margin-top: 8px; font-size: 11px; color: var(--lr-muted); }
   `;
   document.documentElement.appendChild(style);
   STATE.highlightCssInjected = true;

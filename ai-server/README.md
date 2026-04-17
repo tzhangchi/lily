@@ -28,10 +28,6 @@ AZURE_OPENAI_API_VERSION="2024-12-01-preview"
 # 可选：按 model 单独覆盖 API 版本（优先级高于全局）
 # AZURE_OPENAI_API_VERSION_GPT_4_1="2024-12-01-preview"
 # AZURE_OPENAI_API_VERSION_GPT_5_2="2024-12-01-preview"
-
-# 可选：当你的 Azure Deployment 名称 != 模型名时，用下面映射
-# AZURE_OPENAI_DEPLOYMENT_GPT_4_1="你的部署名"
-# AZURE_OPENAI_DEPLOYMENT_GPT_5_2="你的部署名"
 ```
 
 > 兼容：如果你之前写成了 `AZURE_OPENAI_AZURE_ENDPOINTI`（末尾多了 I），服务端也会读取。
