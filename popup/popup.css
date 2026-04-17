@@ -1,6 +1,6 @@
 :root {
   /* Light mode (Apple-ish) */
-  --bg-primary: #ffffff;
+  --bg-primary: #ffffff; /* 白底 */
   --bg-secondary: #f5f5f7;
   --text-primary: #1d1d1f;
   --text-secondary: #6e6e73;
@@ -11,7 +11,7 @@
   --accent-red: #ff3b30;
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.10);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.08);
-  --glass: rgba(255, 255, 255, 0.78);
+  --glass: rgba(255, 255, 255, 0.92);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -37,9 +37,8 @@ body {
   margin: 0;
   width: 440px;
   height: 640px;
-  background: radial-gradient(1200px 600px at -20% -10%, rgba(0, 113, 227, 0.18), transparent 60%),
-    radial-gradient(900px 500px at 120% 0%, rgba(48, 209, 88, 0.12), transparent 55%),
-    var(--bg-secondary);
+  /* Light mode：白色背景（更贴近 Apple 观感） */
+  background: var(--bg-primary);
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui, "PingFang SC",
     "Microsoft YaHei", Arial, sans-serif;
@@ -70,7 +69,7 @@ body {
   border-radius: 999px;
   font-size: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--bg-secondary);
   min-width: 46px;
   text-align: center;
 }
@@ -89,9 +88,7 @@ body {
   font-size: 11px;
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  background: var(--bg-secondary);
 }
 @media (prefers-color-scheme: dark) {
   .chip { background: rgba(255, 255, 255, 0.06); }
@@ -108,7 +105,7 @@ body {
   padding: 9px 10px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
@@ -135,8 +132,6 @@ body {
   padding: 14px;
   margin-bottom: 12px;
   box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 .card h3 { margin: 0 0 10px; font-size: 12px; color: var(--text-primary); letter-spacing: 0.01em; }
 .muted { color: var(--text-secondary); font-size: 12px; }
@@ -146,7 +141,7 @@ body {
   padding: 12px;
   border-radius: 16px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.55);
+  background: var(--bg-primary);
 }
 @media (prefers-color-scheme: dark) {
   .metric { background: rgba(255,255,255,0.06); }
@@ -156,7 +151,7 @@ body {
 
 .btn {
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--bg-secondary);
   color: var(--text-primary);
   padding: 9px 12px;
   border-radius: 999px;
@@ -222,7 +217,7 @@ input:checked + .slider:before { transform: translateX(16px); }
   padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.55);
+  background: var(--bg-primary);
   color: var(--text-primary);
   outline: none;
   font-size: 12px;
@@ -239,14 +234,14 @@ textarea { min-height: 84px; resize: vertical; }
 .small { font-size: 11px; color: var(--text-secondary); }
 .link-domain { font-weight: 650; }
 
-.badge { display: inline-block; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); background: rgba(255,255,255,0.45); }
+.badge { display: inline-block; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); background: var(--bg-secondary); }
 @media (prefers-color-scheme: dark) { .badge { background: rgba(255,255,255,0.06); } }
 .badge-blue { border-color: rgba(10, 132, 255, 0.35); color: var(--text-primary); }
 .badge-orange { border-color: rgba(255, 159, 10, 0.35); color: var(--text-primary); }
 .badge-red { border-color: rgba(255, 59, 48, 0.35); color: var(--text-primary); }
 .badge-gray { border-color: rgba(142, 142, 147, 0.28); }
 
-.accordion { margin-top: 6px; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; background: rgba(255,255,255,0.35); }
+.accordion { margin-top: 6px; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; background: var(--bg-primary); }
 @media (prefers-color-scheme: dark) { .accordion { background: rgba(255,255,255,0.04); } }
 .acc-item { border-top: 1px solid var(--border); }
 .acc-item:first-child { border-top: none; }
@@ -270,7 +265,7 @@ textarea { min-height: 84px; resize: vertical; }
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 12px;
-  background: rgba(255,255,255,0.55);
+  background: var(--bg-primary);
 }
 @media (prefers-color-scheme: dark) { .serp { background: rgba(255,255,255,0.06); } }
 .serp-title { font-size: 14px; font-weight: 650; color: var(--accent-blue); }
