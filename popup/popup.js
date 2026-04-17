@@ -11,11 +11,11 @@ const els = {
   toggleHighlight: document.getElementById("toggleHighlight"),
   btnCopySummary: document.getElementById("btnCopySummary"),
   btnExportCsv: document.getElementById("btnExportCsv"),
-  panelOverview: document.getElementById("panel-overview"),
-  panelLinks: document.getElementById("panel-links"),
-  panelInsights: document.getElementById("panel-insights"),
-  panelSeo: document.getElementById("panel-seo"),
-  panelSave: document.getElementById("panel-save")
+  secOverview: document.getElementById("sec-overview"),
+  secLinks: document.getElementById("sec-links"),
+  secInsights: document.getElementById("sec-insights"),
+  secSeo: document.getElementById("sec-seo"),
+  secSave: document.getElementById("sec-save")
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -34,8 +34,8 @@ let linksFilter = {
 init();
 
 async function init() {
-  wireTabs();
   wireActions();
+  wireSideNav();
   const res = await chrome.runtime.sendMessage({ type: "LR_GET_SETTINGS" });
   if (res?.ok) settings = res.settings;
   linksFilter.scope = settings.defaultScope || "content";
@@ -46,20 +46,6 @@ async function init() {
   // 交互优化：打开插件弹窗时，默认自动触发一次分析（失败不影响手动 Analyze 重试）
   // 注意：Chrome 限制页面（如 Chrome Web Store / 设置页）会返回错误提示
   runAnalyze();
-}
-
-function wireTabs() {
-  const tabs = Array.from(document.querySelectorAll(".tab"));
-  tabs.forEach((t) =>
-    t.addEventListener("click", () => {
-      tabs.forEach((x) => x.classList.remove("active"));
-      t.classList.add("active");
-      const key = t.dataset.tab;
-      for (const p of Array.from(document.querySelectorAll(".panel"))) p.classList.remove("active");
-      document.getElementById(`panel-${key}`).classList.add("active");
-      renderAll();
-    })
-  );
 }
 
 function wireActions() {
@@ -84,6 +70,22 @@ function wireActions() {
     const res = await chrome.runtime.sendMessage({ type: "LR_EXPORT_CSV" });
     if (!res?.ok) toast(res?.error || "导出失败");
   });
+}
+
+function wireSideNav() {
+  const navItems = Array.from(document.querySelectorAll("[data-jump]"));
+  const setActive = (btn) => {
+    navItems.forEach((x) => x.classList.remove("nav-item-active"));
+    btn.classList.add("nav-item-active");
+  };
+  navItems.forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-jump");
+      const el = id ? document.getElementById(id) : null;
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      setActive(btn);
+    })
+  );
 }
 
 async function runAnalyze() {
@@ -154,30 +156,30 @@ function renderChips() {
 }
 
 function renderAll() {
-  const activeKey = document.querySelector(".tab.active")?.dataset?.tab || "overview";
-  if (activeKey === "overview") renderOverview();
-  if (activeKey === "links") renderLinks();
-  if (activeKey === "insights") renderInsights();
-  if (activeKey === "seo") renderSeo();
-  if (activeKey === "save") renderSave();
+  // 默认展示所有内容：从上往下渲染各个区域（不再用 tab 切换）
+  renderOverview();
+  renderLinks();
+  renderInsights();
+  renderSeo();
+  renderSave();
 }
 
 function renderEmpty() {
-  els.panelOverview.innerHTML = `
+  els.secOverview.innerHTML = `
     <div class="card">
       <h3>开始使用</h3>
       <div class="muted">打开任意页面后点击右上角 <b>Analyze</b>，即可得到外链/竞品/商业痕迹与机会评分。</div>
       <div class="muted" style="margin-top:8px;">提示：首次使用时请允许访问当前页面。</div>
     </div>
   `;
-  els.panelLinks.innerHTML = `<div class="card"><div class="muted">请先 Analyze。</div></div>`;
-  els.panelInsights.innerHTML = `<div class="card"><div class="muted">请先 Analyze。</div></div>`;
-  els.panelSeo.innerHTML = `<div class="card"><div class="muted">请先 Analyze。</div></div>`;
-  els.panelSave.innerHTML = `<div class="card"><div class="muted">请先 Analyze。</div></div>`;
+  els.secLinks.innerHTML = `<div class="card"><div class="muted">请先 Analyze。</div></div>`;
+  els.secInsights.innerHTML = `<div class="card"><div class="muted">请先 Analyze。</div></div>`;
+  els.secSeo.innerHTML = `<div class="card"><div class="muted">请先 Analyze。</div></div>`;
+  els.secSave.innerHTML = `<div class="card"><div class="muted">请先 Analyze。</div></div>`;
 }
 
 function renderError(msg) {
-  els.panelOverview.innerHTML = `
+  els.secOverview.innerHTML = `
     <div class="card">
       <h3>无法分析</h3>
       <div class="muted error">${escapeHtml(msg)}</div>
@@ -190,6 +192,11 @@ function renderError(msg) {
       </div>
     </div>
   `;
+  // 其余区域保持占位，避免空白
+  els.secLinks.innerHTML = `<div class="card"><div class="muted">—</div></div>`;
+  els.secInsights.innerHTML = `<div class="card"><div class="muted">—</div></div>`;
+  els.secSeo.innerHTML = `<div class="card"><div class="muted">—</div></div>`;
+  els.secSave.innerHTML = `<div class="card"><div class="muted">—</div></div>`;
 }
 
 function renderOverview() {
@@ -198,7 +205,7 @@ function renderOverview() {
   const topProducts = (analysis.links || []).slice(0, 5);
   const ai = analysis.ai || null;
 
-  els.panelOverview.innerHTML = `
+  els.secOverview.innerHTML = `
     <div class="card">
       <h3>一句话总结</h3>
       <div>${escapeHtml(ai?.summary || analysis.summary || "")}</div>
@@ -271,7 +278,7 @@ function renderLinks() {
 
   const filtered = (analysis.links || []).filter((l) => passesFilter(l));
 
-  els.panelLinks.innerHTML = `
+  els.secLinks.innerHTML = `
     <div class="card">
       <h3>筛选</h3>
       <div class="row">
@@ -425,7 +432,7 @@ function wireAccordion() {
 function renderInsights() {
   if (!analysis) return renderEmpty();
   const ai = analysis.ai || null;
-  els.panelInsights.innerHTML = `
+  els.secInsights.innerHTML = `
     <div class="card">
       <h3>洞察（3-5 条）</h3>
       ${renderBullets(analysis.insights || [])}
@@ -474,7 +481,7 @@ function renderSeo() {
     </div>
   `;
 
-  els.panelSeo.innerHTML = `
+  els.secSeo.innerHTML = `
     <div class="card">
       <h3>基础信息</h3>
       <div class="kv-list">
@@ -565,7 +572,7 @@ function renderSeo() {
 
 function renderSave() {
   if (!analysis) return renderEmpty();
-  els.panelSave.innerHTML = `
+  els.secSave.innerHTML = `
     <div class="card">
       <h3>保存到本地库</h3>
       <div class="row">
@@ -607,6 +614,7 @@ function renderSave() {
 
   loadHistory();
 }
+
 
 async function loadHistory() {
   const el = document.getElementById("history");

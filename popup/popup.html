@@ -8,49 +8,77 @@
     <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
-    <div class="app">
-      <div class="topbar">
-        <div class="title">
-          <img id="favicon" class="favicon" alt="" />
-          <div class="title-text">
-            <div id="pageTitle" class="page-title">Link Radar</div>
-            <div id="pageMeta" class="page-meta">未分析</div>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="side-brand">Lily</div>
+        <nav class="side-nav">
+          <button class="nav-item nav-item-active" data-jump="sec-overview">Overview</button>
+          <button class="nav-item" data-jump="sec-links">Links</button>
+          <button class="nav-item" data-jump="sec-insights">Insights</button>
+          <button class="nav-item" data-jump="sec-seo">SEO</button>
+          <button class="nav-item" data-jump="sec-save">Save</button>
+        </nav>
+      </aside>
+
+      <div class="main">
+        <div class="app">
+          <div class="topbar">
+            <div class="title">
+              <img id="favicon" class="favicon" alt="" />
+              <div class="title-text">
+                <div id="pageTitle" class="page-title">Link Radar</div>
+                <div id="pageMeta" class="page-meta">未分析</div>
+              </div>
+            </div>
+            <div class="actions">
+              <div id="scorePill" class="pill pill-gray">--</div>
+              <button id="btnAnalyze" class="btn btn-primary">Analyze</button>
+            </div>
           </div>
-        </div>
-        <div class="actions">
-          <div id="scorePill" class="pill pill-gray">--</div>
-          <button id="btnAnalyze" class="btn btn-primary">Analyze</button>
-        </div>
-      </div>
 
-      <div id="chips" class="chips"></div>
+          <div id="chips" class="chips"></div>
 
-      <div class="tabs">
-        <button class="tab active" data-tab="overview">Overview</button>
-        <button class="tab" data-tab="links">Links</button>
-        <button class="tab" data-tab="insights">Insights</button>
-        <button class="tab" data-tab="seo">SEO</button>
-        <button class="tab" data-tab="save">Save</button>
-      </div>
+          <div class="content">
+            <div class="sections">
+              <section class="section">
+                <div class="section-head"><h2>Overview</h2></div>
+                <div id="sec-overview" class="section-body"></div>
+              </section>
 
-      <div class="content">
-        <div class="panel active" id="panel-overview"></div>
-        <div class="panel" id="panel-links"></div>
-        <div class="panel" id="panel-insights"></div>
-        <div class="panel" id="panel-seo"></div>
-        <div class="panel" id="panel-save"></div>
-      </div>
+              <section class="section">
+                <div class="section-head"><h2>Links</h2></div>
+                <div id="sec-links" class="section-body"></div>
+              </section>
 
-      <div class="footer">
-        <label class="switch">
-          <input id="toggleHighlight" type="checkbox" />
-          <span class="slider"></span>
-        </label>
-        <span class="footer-text">高亮正文外链</span>
+              <section class="section">
+                <div class="section-head"><h2>Insights</h2></div>
+                <div id="sec-insights" class="section-body"></div>
+              </section>
 
-        <div class="footer-actions">
-          <button id="btnCopySummary" class="btn btn-ghost">Copy Summary</button>
-          <button id="btnExportCsv" class="btn btn-ghost">Export CSV</button>
+              <section class="section">
+                <div class="section-head"><h2>SEO</h2></div>
+                <div id="sec-seo" class="section-body"></div>
+              </section>
+
+              <section class="section">
+                <div class="section-head"><h2>Save</h2></div>
+                <div id="sec-save" class="section-body"></div>
+              </section>
+            </div>
+          </div>
+
+          <div class="footer">
+            <label class="switch">
+              <input id="toggleHighlight" type="checkbox" />
+              <span class="slider"></span>
+            </label>
+            <span class="footer-text">高亮正文外链</span>
+
+            <div class="footer-actions">
+              <button id="btnCopySummary" class="btn btn-ghost">Copy Summary</button>
+              <button id="btnExportCsv" class="btn btn-ghost">Export CSV</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
