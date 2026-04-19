@@ -10,6 +10,7 @@ const els = {
   btnAnalyze: document.getElementById("btnAnalyze"),
   toggleHighlight: document.getElementById("toggleHighlight"),
   btnCopySummary: document.getElementById("btnCopySummary"),
+  btnExportMarkdown: document.getElementById("btnExportMarkdown"),
   btnExportCsv: document.getElementById("btnExportCsv"),
   secOverview: document.getElementById("sec-overview"),
   secLinks: document.getElementById("sec-links"),
@@ -63,6 +64,14 @@ function wireActions() {
     if (!analysis?.summary) return;
     await navigator.clipboard.writeText(analysis.summary);
     toast("已复制 Summary");
+  });
+
+  els.btnExportMarkdown.addEventListener("click", async () => {
+    if (!analysis) return toast("请先分析页面");
+    toast(settings.aiEnabled ? "AI 正在整理 Markdown…" : "正在导出 Markdown…");
+    const res = await chrome.runtime.sendMessage({ type: "LR_EXPORT_MARKDOWN", analysis });
+    if (!res?.ok) toast(res?.error || "导出失败");
+    else toast(res.aiUsed ? "已导出 AI Markdown" : "已导出 Markdown");
   });
 
   els.btnExportCsv.addEventListener("click", async () => {
@@ -123,7 +132,7 @@ async function runAnalyze() {
 
 function setBusy(b) {
   els.btnAnalyze.disabled = b;
-  els.btnAnalyze.textContent = b ? "Analyzing…" : "Analyze";
+  els.btnAnalyze.textContent = b ? "分析中…" : "分析页面";
 }
 
 function renderScore(score) {
@@ -459,6 +468,7 @@ function renderInsights() {
 function renderSeo() {
   if (!analysis) return renderEmpty();
   const seo = analysis.seo || {};
+  const pageBrief = analysis.pageBrief || {};
   const issues = seo.issues || [];
   const kws = seo.keywordDensity?.top || [];
   const serp = seo.serp || {};
@@ -492,6 +502,29 @@ function renderSeo() {
         ${kvRow("Canonical", seo.canonical || "", seo.canonicals?.length > 1 ? `重复 ${seo.canonicals.length} 个` : "")}
         ${kvRow("H1", (seo.h1 || []).join(" / "), "建议只保留 1 个，围绕主关键词")}
       </div>
+    </div>
+
+    <div class="card">
+      <h3>落地页转化元素</h3>
+      <div class="metrics">
+        ${metric("折扣/Offer", (pageBrief.discountBanners || []).length)}
+        ${metric("免费/CTA", (pageBrief.freeButtons || pageBrief.ctas || []).length)}
+        ${metric("页面切换", (pageBrief.pageSwitches || []).length)}
+        ${metric("案例/效果", (pageBrief.examples || []).length)}
+      </div>
+      <div style="margin-top:12px;">
+        ${renderSignalBlock("顶部折扣", pageBrief.discountBanners)}
+        ${renderSignalBlock("免费按钮 / CTA", (pageBrief.freeButtons || []).length ? pageBrief.freeButtons : pageBrief.ctas)}
+        ${renderSignalBlock("页面切换 / Tabs", pageBrief.pageSwitches)}
+        ${renderSignalBlock("默认模型", pageBrief.defaultModels)}
+        ${renderSignalBlock("效果好的案例", pageBrief.examples)}
+        ${renderSignalBlock("生成记录 Tab", pageBrief.generationHistory)}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>侧边栏与功能密度</h3>
+      ${renderSidebars(pageBrief.sidebarFeatures || [])}
     </div>
 
     <div class="card">
@@ -563,11 +596,64 @@ function renderSeo() {
         ${kvRow("twitter:description", social.twitter?.["twitter:description"] || "")}
       </div>
     </div>
+
+    <div class="card">
+      <h3>Markdown 页面复刻</h3>
+      <div class="muted">导出会包含 SEO、SERP、关键词密度、转化元素、视觉风格、图片和页面 HTML 层级。启用 AI 后会先整理成高质量复刻 brief，失败则回退本地版本。</div>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnCopyMarkdown" class="btn btn-primary">Copy AI Markdown</button>
+        <button id="btnDownloadMarkdown" class="btn btn-ghost">Export AI Markdown</button>
+      </div>
+    </div>
   `;
 
   for (const btn of Array.from(document.querySelectorAll("[data-seo-open]"))) {
     btn.addEventListener("click", () => chrome.tabs.create({ url: btn.getAttribute("data-seo-open") }));
   }
+  document.getElementById("btnCopyMarkdown")?.addEventListener("click", async () => {
+    if (!analysis) return toast("请先分析页面");
+    toast(settings.aiEnabled ? "AI 正在整理 Markdown…" : "正在生成 Markdown…");
+    const res = await chrome.runtime.sendMessage({ type: "LR_BUILD_MARKDOWN", analysis });
+    if (!res?.ok || !res.markdown) return toast(res?.error || "暂无 Markdown");
+    await navigator.clipboard.writeText(res.markdown);
+    toast(res.aiUsed ? "已复制 AI Markdown" : "已复制 Markdown");
+  });
+  document.getElementById("btnDownloadMarkdown")?.addEventListener("click", async () => {
+    if (!analysis) return toast("请先分析页面");
+    toast(settings.aiEnabled ? "AI 正在整理 Markdown…" : "正在导出 Markdown…");
+    const res = await chrome.runtime.sendMessage({ type: "LR_EXPORT_MARKDOWN", analysis });
+    if (!res?.ok) toast(res?.error || "导出失败");
+    else toast(res.aiUsed ? "已导出 AI Markdown" : "已导出 Markdown");
+  });
+}
+
+function renderSignalBlock(title, items = []) {
+  const list = (items || []).slice(0, 6);
+  return `
+    <div class="signal-block">
+      <div class="signal-title">${escapeHtml(title)}</div>
+      ${
+        list.length
+          ? list.map((item) => `<div class="signal-item"><span class="badge badge-gray">${escapeHtml(item.location || item.tag || "page")}</span><span>${escapeHtml(item.text || item.label || item.hint || "")}</span></div>`).join("")
+          : `<div class="muted">未检测到</div>`
+      }
+    </div>
+  `;
+}
+
+function renderSidebars(sidebars = []) {
+  if (!sidebars.length) return `<div class="muted">未检测到侧边栏功能列表。</div>`;
+  return sidebars
+    .slice(0, 4)
+    .map(
+      (sidebar) => `
+        <div class="signal-block">
+          <div class="signal-title">${escapeHtml(sidebar.title || "Sidebar")}</div>
+          ${(sidebar.items || []).slice(0, 12).map((item) => `<div class="signal-item"><span>${escapeHtml(item)}</span></div>`).join("") || `<div class="muted">无可读条目</div>`}
+        </div>
+      `
+    )
+    .join("");
 }
 
 function renderSave() {

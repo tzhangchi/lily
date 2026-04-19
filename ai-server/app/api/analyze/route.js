@@ -32,7 +32,7 @@ export async function OPTIONS() {
 
 export async function POST(req) {
   try {
-    const { analysis, model } = await req.json();
+    const { analysis, model, mode } = await req.json();
     if (!analysis?.url) return Response.json({ ok: false, error: "missing analysis" }, { status: 400, headers: corsHeaders() });
 
     const endpoint = getEnvEndpoint();
@@ -49,7 +49,10 @@ export async function POST(req) {
       process.env.AZURE_OPENAI_DEPLOYMENT ||
       modelName; // 默认：假设 deployment 名字就叫 gpt-4.1 / gpt-5.2
 
-    const ai = await enhanceWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment, analysis });
+    const ai =
+      mode === "markdownExport"
+        ? await exportMarkdownWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment, analysis })
+        : await enhanceWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment, analysis });
 
     return Response.json({ ok: true, ai }, { headers: corsHeaders() });
   } catch (e) {
@@ -92,6 +95,45 @@ async function enhanceWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment
   const parsed = safeJsonParse(content);
   if (!parsed) throw new Error("model did not return valid json");
   return normalizeAi(parsed);
+}
+
+async function exportMarkdownWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment, analysis }) {
+  const url = `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+  const prompt = buildMarkdownPrompt(analysis);
+
+  const body = {
+    temperature: 0.15,
+    max_tokens: 5200,
+    messages: [
+      {
+        role: "system",
+        content:
+          "你是一个顶级增长设计师、SEO 专家和前端复刻 brief 作者。你必须只输出 JSON，不允许输出代码块、解释文字或 JSON 之外的内容。"
+      },
+      { role: "user", content: prompt }
+    ]
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "api-key": apiKey
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`azure openai http ${res.status}: ${t.slice(0, 300)}`);
+  }
+  const json = await res.json();
+  const content = json?.choices?.[0]?.message?.content || "";
+  const parsed = safeJsonParse(content);
+  if (!parsed?.markdown) throw new Error("model did not return markdown json");
+  return {
+    markdown: String(parsed.markdown || "").trim(),
+    notes: Array.isArray(parsed.notes) ? parsed.notes.slice(0, 8) : []
+  };
 }
 
 function buildPrompt(a) {
@@ -153,6 +195,128 @@ function buildPrompt(a) {
     ),
     "",
     "强约束：只输出 JSON，不能有多余文字。"
+  ].join("\n");
+}
+
+function buildMarkdownPrompt(a) {
+  const seo = a.seo || {};
+  const pageBrief = a.pageBrief || {};
+  const visualStyle = pageBrief.visualStyle || {};
+  const topLinks = (a.links || []).slice(0, 30);
+  const compactBrief = {
+    highlights: pageBrief.highlights || [],
+    discountBanners: pageBrief.discountBanners || [],
+    freeButtons: pageBrief.freeButtons || [],
+    ctas: pageBrief.ctas || [],
+    headings: pageBrief.headings || [],
+    pageSwitches: pageBrief.pageSwitches || [],
+    defaultModels: pageBrief.defaultModels || [],
+    examples: pageBrief.examples || [],
+    generationHistory: pageBrief.generationHistory || [],
+    sidebarFeatures: pageBrief.sidebarFeatures || [],
+    navItems: pageBrief.navItems || [],
+    forms: pageBrief.forms || [],
+    trustSignals: pageBrief.trustSignals || [],
+    images: pageBrief.images || [],
+    visualStyle,
+    sectionTree: pageBrief.sectionTree || [],
+    structure: String(pageBrief.structure || "").slice(0, 18000)
+  };
+
+  return [
+    "请把网页抽取结果整理成一份高质量 Markdown。核心任务不是 SEO 报告，而是基于 HTML 树理解页面，从上到下还原每个 Section。",
+    "",
+    "目标：这份 Markdown 要能让另一个 AI 或前端工程师尽可能复刻页面的“页面顺序 + Section 布局 + 文字 + 按钮 + 图片 + 组件 + 视觉细节”。",
+    "必须优先使用 sectionTree。sectionTree 是从 HTML/DOM 抽出来的树形结构，请按它的顺序理解页面，而不是把 SEO 信息放在最前面泛泛分析。",
+    "不要只是罗列原始数据。请你把 HTML 树转译成可读的页面蓝图：每个 Section 是什么、为什么存在、里面有什么文字、按钮、链接、图、tab、输入框、侧边栏、视觉样式。",
+    "",
+    "必须包含这些章节，顺序固定：",
+    "1. Page Snapshot",
+    "2. Page Reconstruction Tree",
+    "3. Section-by-section Blueprint",
+    "4. Visual Style System",
+    "5. Component Inventory",
+    "6. Conversion Architecture",
+    "7. SEO Extract",
+    "8. Images And Media",
+    "9. Replication Prompt",
+    "10. Issues And Opportunities",
+    "11. Raw Evidence Appendix",
+    "",
+    "写作要求：",
+    "- 中文为主，保留页面原英文文案。",
+    "- Page Reconstruction Tree 必须用树形 Markdown 展示页面从上到下的层级，至少保留 Header/Main/每个 Section/Footer。",
+    "- Section-by-section Blueprint 必须按页面出现顺序逐段写，每段包含：Section 名称、目的、布局、视觉样式、完整可见文案、按钮/链接、图片/媒体、交互状态、复刻注意点。",
+    "- 如果一个 section 有子节点或卡片网格，要用嵌套 bullet 展开，不能压缩成一句话。",
+    "- 对按钮文案要逐字保留；对标题、副标题、折扣条、tab 名、默认模型、案例标题、生成记录、侧边栏功能要重点保留。",
+    "- 对标题、CTA、折扣、tab、默认模型、案例、生成记录、侧边栏功能要重点解释。",
+    "- Visual Style System 要总结颜色、字体、按钮、卡片、布局宽度、圆角、阴影、密度、整体气质。",
+    "- Replication Prompt 要写成可直接喂给生成页面 AI 的指令，要求按 Section 顺序实现。",
+    "- Raw Evidence Appendix 只放必要证据，避免把所有噪音塞进去。",
+    "- 如果无法确定，写“未检测到”或“推断：...”，不要编造具体数值。",
+    "- SEO Extract 要保留 Title、Description、Canonical、H1、关键词密度和 issues，但不要让 SEO 淹没页面还原。",
+    "",
+    "你必须输出 JSON：",
+    JSON.stringify({ markdown: "完整 Markdown 字符串", notes: ["可选：导出质量备注"] }, null, 2),
+    "",
+    "【页面基础信息】",
+    JSON.stringify(
+      {
+        url: a.url,
+        title: a.title,
+        domain: a.domain,
+        pageType: a.pageType,
+        score: a.score,
+        summary: a.summary,
+        insights: a.insights,
+        ai: a.ai || null
+      },
+      null,
+      2
+    ),
+    "",
+    "【SEO】",
+    JSON.stringify(
+      {
+        title: seo.title,
+        description: seo.description,
+        canonical: seo.canonical,
+        h1: seo.h1,
+        wordCount: seo.wordCount,
+        zhCharCount: seo.zhCharCount,
+        keywordDensity: seo.keywordDensity,
+        serp: seo.serp,
+        social: seo.social,
+        issues: seo.issues
+      },
+      null,
+      2
+    ),
+    "",
+    "【落地页与视觉证据】",
+    JSON.stringify(compactBrief, null, 2).slice(0, 36000),
+    "",
+    "【正文文本样本】",
+    String(a.textSample || "").slice(0, 12000),
+    "",
+    "【外链样本】",
+    JSON.stringify(
+      topLinks.map((l) => ({
+        url: l.url,
+        domain: l.domain,
+        anchorText: l.anchorText,
+        location: l.location,
+        category: l.category,
+        isCompetitor: l.isCompetitor,
+        isSponsored: l.isSponsored,
+        isNofollow: l.isNofollow,
+        contextText: l.contextText
+      })),
+      null,
+      2
+    ),
+    "",
+    "强约束：只输出 JSON。JSON 里的 markdown 字段可以包含 Markdown 文本。"
   ].join("\n");
 }
 

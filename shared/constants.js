@@ -7,7 +7,7 @@ export const DEFAULT_SETTINGS = {
 
   // AI（可选）：默认关闭，插件在无 AI 环境下照常工作
   aiEnabled: false,
-  aiServerUrl: "http://localhost:3000", // Next.js 服务进程地址
+  aiServerUrl: "http://localhost:3100", // Next.js 服务进程地址
   aiModel: "gpt-4.1" // 支持：gpt-4.1 / gpt-5.2（按服务端部署名映射）
 };
 

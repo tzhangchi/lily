@@ -350,6 +350,7 @@ function analyzeLinks(settings) {
   });
 
   const seo = analyzeSeo({ pageUrl, title });
+  const pageBrief = analyzePageBrief({ pageUrl, title, seo });
   // 给 AI 使用的文本样本（避免 payload 过大）
   const textSample = getSeoText().slice(0, 12_000);
 
@@ -384,6 +385,7 @@ function analyzeLinks(settings) {
     summary,
     insights,
     seo,
+    pageBrief,
     textSample,
     analyzedAt: new Date().toISOString(),
     links
@@ -673,6 +675,779 @@ function buildSeoIssues({ pageUrl, title, description, canonicals, h1, tokenCoun
   }
 
   return issues;
+}
+
+// =========================
+// Landing Page Brief / Export
+// =========================
+
+const LANDING_PATTERNS = {
+  discount: [
+    "off",
+    "discount",
+    "deal",
+    "sale",
+    "save",
+    "coupon",
+    "limited",
+    "black friday",
+    "cyber monday",
+    "折扣",
+    "优惠",
+    "限时",
+    "立减",
+    "买一送一",
+    "促销"
+  ],
+  free: ["free", "try free", "start free", "get started", "免费", "免费试用", "立即免费", "开始使用"],
+  switcher: ["tab", "tabs", "switch", "toggle", "segmented", "切换", "标签"],
+  model: ["model", "gpt", "claude", "gemini", "llama", "flux", "stable diffusion", "默认模型", "模型"],
+  examples: ["example", "gallery", "showcase", "case", "template", "效果", "案例", "模板", "画廊"],
+  history: ["history", "recent", "record", "generated", "generation", "生成记录", "历史", "记录"],
+  sidebar: ["sidebar", "aside", "drawer", "side", "侧边栏"],
+  trust: ["review", "rating", "testimonial", "customer", "trusted", "stars", "评分", "评价", "客户", "信任"]
+};
+
+function analyzePageBrief({ pageUrl, title, seo }) {
+  const candidates = getVisibleCandidates();
+  const pick = (kind, limit = 8) => findByPatterns(candidates, LANDING_PATTERNS[kind] || [], limit);
+  const headings = Array.from(document.querySelectorAll("h1,h2,h3"))
+    .filter(isVisibleElement)
+    .slice(0, 40)
+    .map((el) => ({
+      level: el.tagName.toLowerCase(),
+      text: cleanText(el.textContent).slice(0, 180)
+    }))
+    .filter((x) => x.text);
+  const images = extractKeyImages();
+  const ctas = extractCtas(candidates);
+  const navItems = extractNavItems();
+  const visualStyle = extractVisualStyle();
+  const sectionTree = buildSectionTree();
+  const forms = Array.from(document.querySelectorAll("form,input[type='email'],input[type='search'],textarea"))
+    .filter(isVisibleElement)
+    .slice(0, 12)
+    .map((el) => summarizeElement(el))
+    .filter((x) => x.text || x.label);
+  const markdown = buildPageMarkdown({
+    pageUrl,
+    title,
+    seo,
+    headings,
+    images,
+    ctas,
+    discountBanners: pick("discount", 6),
+    freeButtons: pick("free", 8),
+    pageSwitches: detectPageSwitches(candidates),
+    defaultModels: pick("model", 8),
+    examples: pick("examples", 8),
+    generationHistory: pick("history", 8),
+    sidebarFeatures: detectSidebarFeatures(),
+    navItems,
+    forms,
+    trustSignals: pick("trust", 8),
+    visualStyle,
+    sectionTree,
+    structure: buildHtmlStructureMarkdown()
+  });
+
+  return {
+    highlights: summarizeHighlights({ seo, ctas, headings, images }),
+    discountBanners: pick("discount", 6),
+    freeButtons: pick("free", 8),
+    ctas,
+    headings,
+    pageSwitches: detectPageSwitches(candidates),
+    defaultModels: pick("model", 8),
+    examples: pick("examples", 8),
+    generationHistory: pick("history", 8),
+    sidebarFeatures: detectSidebarFeatures(),
+    navItems,
+    forms,
+    trustSignals: pick("trust", 8),
+    images,
+    visualStyle,
+    sectionTree,
+    structure: buildHtmlStructureMarkdown(),
+    markdown
+  };
+}
+
+function getVisibleCandidates() {
+  const selector = [
+    "header",
+    "nav",
+    "main",
+    "section",
+    "article",
+    "aside",
+    "footer",
+    "button",
+    "a",
+    "[role='button']",
+    "[role='tab']",
+    "[role='switch']",
+    "[role='navigation']",
+    "[aria-label]",
+    "[class]",
+    "[id]"
+  ].join(",");
+  return Array.from(document.querySelectorAll(selector))
+    .filter(isVisibleElement)
+    .slice(0, 900)
+    .map((el) => summarizeElement(el))
+    .filter((x) => x.text || x.label || x.hint);
+}
+
+function summarizeElement(el) {
+  const tag = el.tagName?.toLowerCase?.() || "";
+  const role = el.getAttribute?.("role") || "";
+  const label = cleanText(el.getAttribute?.("aria-label") || el.getAttribute?.("title") || el.getAttribute?.("placeholder") || "");
+  const text = cleanText(el.innerText || el.textContent || "");
+  const classId = safeLower(`${el.id || ""} ${typeof el.className === "string" ? el.className : ""}`);
+  const href = tag === "a" ? normalizeUrl(el.getAttribute("href") || "", location.href) : "";
+  const imgAlt = tag === "img" ? cleanText(el.getAttribute("alt") || "") : "";
+  return {
+    tag,
+    role,
+    label,
+    text: (label || text || imgAlt).slice(0, 260),
+    hint: classId.slice(0, 220),
+    location: getElementLocation(el),
+    href
+  };
+}
+
+function findByPatterns(candidates, patterns, limit) {
+  const seen = new Set();
+  const result = [];
+  for (const item of candidates) {
+    const haystack = safeLower(`${item.text} ${item.label} ${item.hint} ${item.role}`);
+    if (!patterns.some((p) => haystack.includes(p))) continue;
+    const key = safeLower(`${item.location}:${item.text || item.label}:${item.hint}`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function extractCtas(candidates) {
+  const strong = ["free", "start", "try", "sign up", "get started", "download", "buy", "upgrade", "create", "generate", "免费", "开始", "生成", "立即", "下载", "购买", "注册"];
+  return candidates
+    .filter((item) => ["button", "a"].includes(item.tag) || item.role === "button")
+    .filter((item) => {
+      const h = safeLower(`${item.text} ${item.label} ${item.hint}`);
+      return strong.some((p) => h.includes(p));
+    })
+    .slice(0, 14);
+}
+
+function detectPageSwitches(candidates) {
+  return candidates
+    .filter((item) => {
+      const h = safeLower(`${item.tag} ${item.role} ${item.text} ${item.label} ${item.hint}`);
+      return item.role === "tab" || item.role === "switch" || LANDING_PATTERNS.switcher.some((p) => h.includes(p));
+    })
+    .slice(0, 12);
+}
+
+function detectSidebarFeatures() {
+  const roots = Array.from(document.querySelectorAll("aside,[role='complementary'],[class*='sidebar'],[class*='side-bar'],[id*='sidebar'],[id*='side-bar']"))
+    .filter(isVisibleElement)
+    .slice(0, 6);
+  const features = [];
+  for (const root of roots) {
+    const title = cleanText(root.querySelector("h1,h2,h3,[aria-label]")?.textContent || root.getAttribute("aria-label") || "Sidebar");
+    const items = Array.from(root.querySelectorAll("a,button,[role='button'],li"))
+      .filter(isVisibleElement)
+      .map((el) => cleanText(el.innerText || el.textContent || el.getAttribute("aria-label") || ""))
+      .filter(Boolean)
+      .slice(0, 18);
+    features.push({ title, items });
+  }
+  return features;
+}
+
+function extractNavItems() {
+  return Array.from(document.querySelectorAll("nav a,nav button,header a,header button"))
+    .filter(isVisibleElement)
+    .map((el) => cleanText(el.innerText || el.textContent || el.getAttribute("aria-label") || ""))
+    .filter(Boolean)
+    .slice(0, 30);
+}
+
+function extractKeyImages() {
+  return Array.from(document.images || [])
+    .filter(isVisibleElement)
+    .map((img) => ({
+      alt: cleanText(img.getAttribute("alt") || ""),
+      src: normalizeUrl(img.currentSrc || img.src || "", location.href) || "",
+      width: img.naturalWidth || img.width || 0,
+      height: img.naturalHeight || img.height || 0,
+      location: getElementLocation(img)
+    }))
+    .filter((img) => img.src)
+    .sort((a, b) => b.width * b.height - a.width * a.height)
+    .slice(0, 18);
+}
+
+function summarizeHighlights({ seo, ctas, headings, images }) {
+  const out = [];
+  if (headings[0]?.text) out.push(`首屏主标题：${headings[0].text}`);
+  if (ctas[0]?.text) out.push(`主要 CTA：${ctas[0].text}`);
+  if (seo?.primaryKeyword) out.push(`候选关键词：${seo.primaryKeyword}`);
+  if (images[0]?.alt) out.push(`关键图片：${images[0].alt}`);
+  return out;
+}
+
+function buildPageMarkdown(data) {
+  const lines = [];
+  const add = (s = "") => lines.push(s);
+  const addItems = (items, formatter) => {
+    if (!items?.length) {
+      add("- 未检测到");
+      return;
+    }
+    for (const item of items) add(formatter(item));
+  };
+
+  add(`# ${data.title || "Untitled Page"}`);
+  add("");
+  add(`- URL: ${data.pageUrl}`);
+  add(`- Title: ${data.seo?.title || data.title || ""}`);
+  add(`- Description: ${data.seo?.description || ""}`);
+  add(`- Canonical: ${data.seo?.canonical || "未检测到"}`);
+  add(`- Word count: ${data.seo?.wordCount ?? 0}`);
+  add(`- Chinese chars: ${data.seo?.zhCharCount ?? 0}`);
+  add(`- H1: ${(data.seo?.h1 || []).join(" / ") || "未检测到"}`);
+  add("");
+
+  add("## SEO Issues");
+  addItems(data.seo?.issues || [], (x) => `- [${x.level}] ${x.text}`);
+  add("");
+
+  add("## SERP Preview");
+  add(`- Title: ${data.seo?.serp?.title || ""}`);
+  add(`- URL: ${data.seo?.serp?.displayUrl || ""}`);
+  add(`- Description: ${data.seo?.serp?.description || ""}`);
+  add("");
+
+  add("## Keyword Density");
+  addItems(data.seo?.keywordDensity?.top || [], (x) => `- ${x.term}: ${x.count} (${(x.density * 100).toFixed(2)}%)`);
+  add("");
+
+  add("## Conversion / Landing Page Elements");
+  add("### 顶部折扣 / Offer");
+  addItems(data.discountBanners, formatBriefItem);
+  add("");
+  add("### 免费按钮 / CTA");
+  addItems(data.freeButtons.length ? data.freeButtons : data.ctas, formatBriefItem);
+  add("");
+  add("### 标题层级");
+  addItems(data.headings, (x) => `- ${"#".repeat(Number(x.level?.slice(1)) || 2)} ${x.text}`);
+  add("");
+  add("### 页面切换 / Tabs");
+  addItems(data.pageSwitches, formatBriefItem);
+  add("");
+  add("### 默认模型 / Model Signals");
+  addItems(data.defaultModels, formatBriefItem);
+  add("");
+  add("### 效果好的案例 / Examples");
+  addItems(data.examples, formatBriefItem);
+  add("");
+  add("### 生成记录 Tab / History");
+  addItems(data.generationHistory, formatBriefItem);
+  add("");
+  add("### 侧边栏功能感");
+  if (!data.sidebarFeatures.length) add("- 未检测到");
+  for (const sidebar of data.sidebarFeatures) {
+    add(`- ${sidebar.title || "Sidebar"}`);
+    for (const item of sidebar.items || []) add(`  - ${item}`);
+  }
+  add("");
+  add("### Trust / Social Proof");
+  addItems(data.trustSignals, formatBriefItem);
+  add("");
+
+  add("## Social Meta");
+  const social = data.seo?.social || {};
+  for (const [k, v] of Object.entries(social.og || {})) add(`- ${k}: ${v || ""}`);
+  for (const [k, v] of Object.entries(social.twitter || {})) add(`- ${k}: ${v || ""}`);
+  add("");
+
+  add("## Images");
+  addItems(data.images, (img) => `- ![${img.alt || "image"}](${img.src}) - ${img.width}x${img.height}, ${img.location}`);
+  add("");
+
+  add("## Visual Style Summary");
+  addVisualStyleMarkdown(lines, data.visualStyle);
+  add("");
+
+  add("## Section-by-section Reconstruction Tree");
+  addSectionTreeMarkdown(lines, data.sectionTree || []);
+  add("");
+
+  add("## Raw Page Structure");
+  add(data.structure || "- 未检测到可读结构");
+
+  return lines.join("\n");
+}
+
+function addVisualStyleMarkdown(lines, visualStyle) {
+  const add = (s = "") => lines.push(s);
+  if (!visualStyle) {
+    add("- 未检测到");
+    return;
+  }
+  add(`- Overall: ${visualStyle.overall || ""}`);
+  add(`- Background: ${visualStyle.body?.backgroundColor || ""}`);
+  add(`- Text: ${visualStyle.body?.color || ""}`);
+  add(`- Font: ${visualStyle.body?.fontFamily || ""}`);
+  add(`- Layout width: ${visualStyle.layout?.maxWidth || ""}`);
+  add("");
+  add("### Colors");
+  for (const item of visualStyle.colors || []) add(`- ${item.value}: ${item.count}`);
+  add("");
+  add("### Typography Samples");
+  for (const item of visualStyle.typography || []) {
+    add(`- ${item.selector}: ${item.fontSize}, ${item.fontWeight}, line-height ${item.lineHeight}, color ${item.color}`);
+  }
+  add("");
+  add("### Component Samples");
+  for (const item of visualStyle.components || []) {
+    add(
+      `- ${item.selector}: bg ${item.backgroundColor}, color ${item.color}, border ${item.border}, radius ${item.borderRadius}, shadow ${item.boxShadow}, padding ${item.padding}`
+    );
+  }
+}
+
+function formatBriefItem(item) {
+  const text = item.text || item.label || item.hint || "";
+  const href = item.href ? ` -> ${item.href}` : "";
+  return `- [${item.location || item.tag || "page"}] ${text}${href}`;
+}
+
+function addSectionTreeMarkdown(lines, sectionTree) {
+  const add = (s = "") => lines.push(s);
+  if (!sectionTree?.length) {
+    add("- 未检测到");
+    return;
+  }
+  const walk = (node, depth = 0) => {
+    const indent = "  ".repeat(depth);
+    add(`${indent}- ${node.label || node.tag}${node.heading ? `: ${node.heading}` : ""}`);
+    if (node.purpose) add(`${indent}  - Purpose: ${node.purpose}`);
+    if (node.styleSummary) add(`${indent}  - Style: ${node.styleSummary}`);
+    for (const text of node.texts || []) add(`${indent}  - Text: ${text}`);
+    for (const action of node.buttons || []) add(`${indent}  - Button: ${action.text}${action.href ? ` -> ${action.href}` : ""}`);
+    for (const link of node.links || []) add(`${indent}  - Link: ${link.text}${link.href ? ` -> ${link.href}` : ""}`);
+    for (const img of node.images || []) add(`${indent}  - Image: ${img.alt || "image"} (${img.src || ""})`);
+    for (const input of node.forms || []) add(`${indent}  - Form/Input: ${input.label || input.placeholder || input.type || "input"}`);
+    for (const tab of node.tabs || []) add(`${indent}  - Tab/Switch: ${tab}`);
+    for (const child of node.children || []) walk(child, depth + 1);
+  };
+  for (const node of sectionTree) walk(node, 0);
+}
+
+function buildSectionTree() {
+  const root =
+    document.querySelector("body > main") ||
+    document.querySelector("main") ||
+    document.querySelector("[role='main']") ||
+    document.body;
+  const topLevel = Array.from(document.body?.children || [])
+    .filter(isVisibleElement)
+    .filter((el) => {
+      const tag = el.tagName?.toLowerCase?.() || "";
+      return ["header", "nav", "main", "section", "article", "aside", "footer"].includes(tag) || el === root;
+    });
+  const roots = topLevel.length ? topLevel : [root];
+  return roots
+    .slice(0, 18)
+    .map((el, idx) => buildSectionNode(el, idx, 0))
+    .filter(Boolean);
+}
+
+function buildSectionNode(el, index, depth) {
+  if (!el || !isVisibleElement(el) || depth > 4) return null;
+  const tag = el.tagName?.toLowerCase?.() || "node";
+  if (["script", "style", "noscript", "svg"].includes(tag)) return null;
+  const role = el.getAttribute?.("role") || "";
+  const id = el.id || "";
+  const classHint = summarizeClassName(el);
+  const heading = getSectionHeading(el);
+  const label = inferSectionLabel(el, index);
+  const children = findSectionChildren(el)
+    .slice(0, depth === 0 ? 14 : 8)
+    .map((child, childIdx) => buildSectionNode(child, childIdx, depth + 1))
+    .filter(Boolean);
+  const node = {
+    tag,
+    role,
+    id,
+    classHint,
+    label,
+    heading,
+    purpose: inferSectionPurpose(el, heading),
+    styleSummary: getSectionStyleSummary(el),
+    texts: extractDirectReadableTexts(el),
+    buttons: extractSectionButtons(el),
+    links: extractSectionLinks(el),
+    images: extractSectionImages(el),
+    forms: extractSectionForms(el),
+    tabs: extractSectionTabs(el),
+    children
+  };
+  if (!hasSectionSignal(node)) return null;
+  return node;
+}
+
+function hasSectionSignal(node) {
+  return (
+    node.heading ||
+    node.texts?.length ||
+    node.buttons?.length ||
+    node.links?.length ||
+    node.images?.length ||
+    node.forms?.length ||
+    node.tabs?.length ||
+    node.children?.length ||
+    ["header", "nav", "main", "aside", "footer"].includes(node.tag)
+  );
+}
+
+function findSectionChildren(el) {
+  const selectors = ":scope > header,:scope > nav,:scope > main,:scope > section,:scope > article,:scope > aside,:scope > footer,:scope > div,:scope > form";
+  return Array.from(el.querySelectorAll(selectors)).filter((child) => {
+    if (!isVisibleElement(child)) return false;
+    const text = cleanText(child.innerText || child.textContent || "");
+    const hasMedia = child.querySelector?.("img,video,canvas,svg");
+    const hasControls = child.querySelector?.("button,a,input,textarea,select,[role='tab'],[role='button']");
+    const hasHeading = child.querySelector?.("h1,h2,h3,h4,h5,h6");
+    return hasHeading || hasMedia || hasControls || text.length >= 30 || ["header", "nav", "main", "section", "article", "aside", "footer", "form"].includes(child.tagName?.toLowerCase?.());
+  });
+}
+
+function getSectionHeading(el) {
+  if (el.matches?.("h1,h2,h3,h4,h5,h6")) return cleanText(el.textContent || "").slice(0, 180);
+  const heading = el.querySelector?.(":scope > h1,:scope > h2,:scope > h3,:scope > h4,:scope > h5,:scope > h6,h1,h2,h3");
+  return cleanText(heading?.textContent || el.getAttribute?.("aria-label") || "").slice(0, 180);
+}
+
+function inferSectionLabel(el, index) {
+  const tag = el.tagName?.toLowerCase?.() || "section";
+  if (tag === "header") return "Header / Top Navigation";
+  if (tag === "nav") return "Navigation";
+  if (tag === "aside") return "Sidebar / Secondary Navigation";
+  if (tag === "footer") return "Footer";
+  const hint = safeLower(`${el.id || ""} ${typeof el.className === "string" ? el.className : ""} ${el.getAttribute?.("aria-label") || ""}`);
+  if (hint.includes("hero")) return "Hero Section";
+  if (hint.includes("pricing")) return "Pricing Section";
+  if (hint.includes("faq")) return "FAQ Section";
+  if (hint.includes("testimonial") || hint.includes("review")) return "Social Proof Section";
+  if (hint.includes("feature")) return "Feature Section";
+  if (hint.includes("gallery") || hint.includes("showcase") || hint.includes("example")) return "Examples / Gallery Section";
+  return `Section ${index + 1}`;
+}
+
+function inferSectionPurpose(el, heading) {
+  const haystack = safeLower(`${heading || ""} ${el.id || ""} ${typeof el.className === "string" ? el.className : ""} ${cleanText(el.innerText || "").slice(0, 400)}`);
+  if (haystack.includes("hero") || el.querySelector?.("h1")) return "首屏承诺、主标题和主要转化入口";
+  if (LANDING_PATTERNS.discount.some((p) => haystack.includes(p))) return "折扣/优惠信息，降低转化阻力";
+  if (LANDING_PATTERNS.free.some((p) => haystack.includes(p))) return "免费试用或低门槛开始使用";
+  if (LANDING_PATTERNS.examples.some((p) => haystack.includes(p))) return "展示案例、效果或模板，帮助用户判断输出质量";
+  if (LANDING_PATTERNS.history.some((p) => haystack.includes(p))) return "生成记录/历史，强调完整生命周期和持续使用";
+  if (LANDING_PATTERNS.model.some((p) => haystack.includes(p))) return "模型选择或默认模型，影响用户对能力边界的理解";
+  if (haystack.includes("faq")) return "FAQ，处理转化前疑虑";
+  if (haystack.includes("pricing") || haystack.includes("price")) return "价格方案，承接购买决策";
+  return "";
+}
+
+function getSectionStyleSummary(el) {
+  const s = window.getComputedStyle(el);
+  const rect = el.getBoundingClientRect();
+  const parts = [
+    `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+    `display ${s.display}`,
+    s.backgroundColor && s.backgroundColor !== "rgba(0, 0, 0, 0)" ? `bg ${s.backgroundColor}` : "",
+    s.color ? `text ${s.color}` : "",
+    parseFloat(s.borderRadius) ? `radius ${s.borderRadius}` : "",
+    s.boxShadow && s.boxShadow !== "none" ? `shadow ${s.boxShadow}` : "",
+    s.padding && s.padding !== "0px" ? `padding ${s.padding}` : "",
+    s.gap && s.gap !== "normal" ? `gap ${s.gap}` : ""
+  ];
+  return parts.filter(Boolean).join(", ");
+}
+
+function extractDirectReadableTexts(el) {
+  const selectors = ":scope > p,:scope > span,:scope > div,:scope > ul,:scope > ol,:scope > small,:scope > strong,:scope > em";
+  const texts = [];
+  for (const child of Array.from(el.querySelectorAll(selectors))) {
+    if (!isVisibleElement(child)) continue;
+    if (child.querySelector?.("section,article,header,footer,aside,nav,form")) continue;
+    const text = cleanText(child.innerText || child.textContent || "");
+    if (text.length < 2) continue;
+    if (texts.some((existing) => existing.includes(text) || text.includes(existing))) continue;
+    texts.push(text.slice(0, 260));
+    if (texts.length >= 8) break;
+  }
+  if (!texts.length) {
+    const own = getOwnReadableText(el);
+    if (own) texts.push(own);
+  }
+  return texts;
+}
+
+function extractSectionButtons(el) {
+  return Array.from(el.querySelectorAll(":scope button,:scope [role='button'],:scope a"))
+    .filter(isVisibleElement)
+    .filter((node) => {
+      const text = cleanText(node.innerText || node.textContent || node.getAttribute("aria-label") || "");
+      if (!text) return false;
+      const tag = node.tagName?.toLowerCase?.();
+      const role = node.getAttribute?.("role") || "";
+      const classHint = safeLower(`${node.id || ""} ${typeof node.className === "string" ? node.className : ""}`);
+      return tag === "button" || role === "button" || LANDING_PATTERNS.free.some((p) => safeLower(`${text} ${classHint}`).includes(p));
+    })
+    .slice(0, 10)
+    .map((node) => ({
+      text: cleanText(node.innerText || node.textContent || node.getAttribute("aria-label") || "").slice(0, 120),
+      href: node.tagName?.toLowerCase?.() === "a" ? normalizeUrl(node.getAttribute("href") || "", location.href) : "",
+      style: getSectionStyleSummary(node)
+    }));
+}
+
+function extractSectionLinks(el) {
+  return Array.from(el.querySelectorAll(":scope a[href]"))
+    .filter(isVisibleElement)
+    .map((node) => ({
+      text: cleanText(node.innerText || node.textContent || node.getAttribute("aria-label") || "").slice(0, 120),
+      href: normalizeUrl(node.getAttribute("href") || "", location.href) || ""
+    }))
+    .filter((x) => x.text && x.href)
+    .slice(0, 10);
+}
+
+function extractSectionImages(el) {
+  return Array.from(el.querySelectorAll(":scope img,:scope picture img"))
+    .filter(isVisibleElement)
+    .map((img) => ({
+      alt: cleanText(img.getAttribute("alt") || "").slice(0, 160),
+      src: normalizeUrl(img.currentSrc || img.src || "", location.href) || "",
+      size: `${img.naturalWidth || img.width || 0}x${img.naturalHeight || img.height || 0}`,
+      style: getSectionStyleSummary(img)
+    }))
+    .filter((x) => x.src)
+    .slice(0, 8);
+}
+
+function extractSectionForms(el) {
+  return Array.from(el.querySelectorAll(":scope input,:scope textarea,:scope select"))
+    .filter(isVisibleElement)
+    .slice(0, 10)
+    .map((node) => ({
+      type: node.getAttribute("type") || node.tagName?.toLowerCase?.() || "input",
+      placeholder: cleanText(node.getAttribute("placeholder") || ""),
+      label: cleanText(node.getAttribute("aria-label") || node.getAttribute("name") || "")
+    }));
+}
+
+function extractSectionTabs(el) {
+  return Array.from(el.querySelectorAll(":scope [role='tab'],:scope [role='switch'],:scope [aria-selected],:scope button"))
+    .filter(isVisibleElement)
+    .map((node) => cleanText(node.innerText || node.textContent || node.getAttribute("aria-label") || ""))
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function summarizeClassName(el) {
+  const raw = typeof el.className === "string" ? el.className : "";
+  return raw
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((x) => !/^(css-|sc-|jsx-|_[a-z0-9]|[a-z0-9]{6,})/i.test(x))
+    .slice(0, 8)
+    .join(" ");
+}
+
+function buildHtmlStructureMarkdown() {
+  const roots = Array.from(document.body?.children || [])
+    .filter(isVisibleElement)
+    .slice(0, 40);
+  const lines = [];
+  let count = 0;
+  const walk = (el, depth) => {
+    if (count > 260 || depth > 5 || !isVisibleElement(el)) return;
+    const tag = el.tagName?.toLowerCase?.() || "node";
+    const role = el.getAttribute?.("role");
+    const label = cleanText(el.getAttribute?.("aria-label") || "");
+    const ownText = getOwnReadableText(el);
+    const heading = el.matches?.("h1,h2,h3,h4,h5,h6") ? cleanText(el.textContent || "") : "";
+    const img = tag === "img" ? cleanText(el.getAttribute("alt") || el.getAttribute("src") || "") : "";
+    const href = tag === "a" ? normalizeUrl(el.getAttribute("href") || "", location.href) : "";
+    const content = heading || label || ownText || img;
+    if (["script", "style", "noscript", "svg"].includes(tag)) return;
+    if (content || ["header", "nav", "main", "section", "article", "aside", "footer", "form"].includes(tag)) {
+      const meta = [tag, role ? `role=${role}` : ""].filter(Boolean).join(" ");
+      const suffix = href ? ` (${href})` : "";
+      lines.push(`${"  ".repeat(depth)}- ${meta}${content ? `: ${content.slice(0, 220)}` : ""}${suffix}`);
+      count += 1;
+    }
+    const children = Array.from(el.children || [])
+      .filter((child) => child.matches?.("header,nav,main,section,article,aside,footer,form,h1,h2,h3,h4,p,ul,ol,li,a,button,img,figure,figcaption,[role='tab'],[role='button']"))
+      .slice(0, 24);
+    for (const child of children) walk(child, depth + 1);
+  };
+  for (const root of roots) walk(root, 0);
+  return lines.join("\n");
+}
+
+function getOwnReadableText(el) {
+  const pieces = [];
+  for (const node of Array.from(el.childNodes || [])) {
+    if (node.nodeType === Node.TEXT_NODE) pieces.push(node.textContent || "");
+  }
+  return cleanText(pieces.join(" ")).slice(0, 180);
+}
+
+function getElementLocation(el) {
+  if (el.closest?.("header,nav,[role='navigation']")) return "top/nav";
+  if (el.closest?.("aside,[role='complementary']")) return "sidebar";
+  if (el.closest?.("footer")) return "footer";
+  if (el.closest?.("main,article,[role='main']")) return "main";
+  return "page";
+}
+
+function extractVisualStyle() {
+  const sample = (selector) => {
+    const el = document.querySelector(selector);
+    if (!el || !isVisibleElement(el)) return null;
+    const s = window.getComputedStyle(el);
+    return {
+      selector,
+      tag: el.tagName?.toLowerCase?.() || "",
+      text: cleanText(el.innerText || el.textContent || el.getAttribute("aria-label") || "").slice(0, 80),
+      color: s.color,
+      backgroundColor: s.backgroundColor,
+      fontFamily: s.fontFamily,
+      fontSize: s.fontSize,
+      fontWeight: s.fontWeight,
+      lineHeight: s.lineHeight,
+      letterSpacing: s.letterSpacing,
+      border: s.border,
+      borderRadius: s.borderRadius,
+      boxShadow: s.boxShadow,
+      padding: s.padding,
+      margin: s.margin,
+      display: s.display,
+      gap: s.gap
+    };
+  };
+  const bodyStyle = window.getComputedStyle(document.body);
+  const samples = [
+    "header",
+    "nav",
+    "main",
+    "h1",
+    "h2",
+    "p",
+    "button",
+    "a",
+    "input",
+    "[role='tab']",
+    "aside",
+    ".card",
+    "[class*='card']",
+    "[class*='hero']",
+    "[class*='sidebar']"
+  ]
+    .map(sample)
+    .filter(Boolean);
+  const typography = samples
+    .filter((x) => ["h1", "h2", "p", "button", "a"].includes(x.selector) || x.selector.includes("tab"))
+    .slice(0, 10);
+  const components = samples
+    .filter((x) => ["header", "nav", "button", "input", "aside", ".card", "[class*='card']", "[role='tab']"].includes(x.selector) || x.selector.includes("sidebar"))
+    .slice(0, 12);
+  const colors = rankStyleColors();
+  const maxWidth = getLikelyMaxWidth();
+  const overall = inferOverallVisualStyle({ bodyStyle, samples, colors });
+
+  return {
+    overall,
+    body: {
+      color: bodyStyle.color,
+      backgroundColor: bodyStyle.backgroundColor,
+      fontFamily: bodyStyle.fontFamily,
+      fontSize: bodyStyle.fontSize
+    },
+    layout: {
+      viewport: `${window.innerWidth}x${window.innerHeight}`,
+      maxWidth
+    },
+    colors,
+    typography,
+    components
+  };
+}
+
+function rankStyleColors() {
+  const map = new Map();
+  const add = (value) => {
+    if (!value || value === "rgba(0, 0, 0, 0)" || value === "transparent") return;
+    map.set(value, (map.get(value) || 0) + 1);
+  };
+  const nodes = Array.from(document.querySelectorAll("body,header,nav,main,section,article,aside,footer,h1,h2,h3,p,a,button,input,[class]"))
+    .filter(isVisibleElement)
+    .slice(0, 500);
+  for (const el of nodes) {
+    const s = window.getComputedStyle(el);
+    add(s.color);
+    add(s.backgroundColor);
+    add(s.borderColor);
+  }
+  return Array.from(map.entries())
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 12);
+}
+
+function getLikelyMaxWidth() {
+  const nodes = Array.from(document.querySelectorAll("main,section,article,[class*='container'],[class*='wrapper']"))
+    .filter(isVisibleElement)
+    .slice(0, 80);
+  const widths = nodes.map((el) => Math.round(el.getBoundingClientRect().width)).filter((w) => w > 0);
+  if (!widths.length) return "";
+  widths.sort((a, b) => b - a);
+  return `${widths[0]}px`;
+}
+
+function inferOverallVisualStyle({ bodyStyle, samples, colors }) {
+  const bg = safeLower(bodyStyle.backgroundColor);
+  const text = safeLower(document.body?.innerText || "");
+  const hasRadius = samples.some((x) => parseFloat(x.borderRadius) >= 12);
+  const hasShadow = samples.some((x) => x.boxShadow && x.boxShadow !== "none");
+  const hasSidebar = !!document.querySelector("aside,[class*='sidebar'],[id*='sidebar']");
+  const density = (document.querySelectorAll("button,a,input,[role='tab']").length || 0) > 40 ? "功能密集" : "中等密度";
+  const tone = bg.includes("255, 255, 255") ? "浅色" : bg.includes("0, 0, 0") || bg.includes("17, 24, 39") ? "深色" : "混合背景";
+  const category = text.includes("ai") || text.includes("model") || text.includes("生成") ? "AI 工具/生成类落地页" : "SaaS/产品落地页";
+  return [tone, density, category, hasRadius ? "圆角组件" : "", hasShadow ? "带阴影层次" : "", hasSidebar ? "侧边栏功能入口" : ""]
+    .filter(Boolean)
+    .join("，");
+}
+
+function cleanText(text) {
+  return (text || "").replace(/\s+/g, " ").trim();
+}
+
+function isVisibleElement(el) {
+  if (!el || !el.getBoundingClientRect) return false;
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  const style = window.getComputedStyle(el);
+  return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) !== 0;
 }
 
 function addTooltipHandlers() {

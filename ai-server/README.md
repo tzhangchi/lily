@@ -10,9 +10,9 @@ npm i
 npm run dev
 ```
 
-默认监听：`http://localhost:3000`
+默认监听：`http://localhost:3100`
 
-健康检查：`http://localhost:3000/api/health`
+健康检查：`http://localhost:3100/api/health`
 
 ## 2) 环境变量（Azure OpenAI）
 
@@ -37,7 +37,7 @@ AZURE_OPENAI_API_VERSION="2024-12-01-preview"
 打开插件 Settings：
 
 - **启用 AI**：是
-- **AI 服务地址**：`http://localhost:3000`
+- **AI 服务地址**：`http://localhost:3100`
 - **默认模型**：`gpt-4.1` 或 `gpt-5.2`
 
 ## 4) 接口

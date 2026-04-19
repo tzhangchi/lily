@@ -45,7 +45,7 @@ function fill(s) {
   elMy.value = (s.myProductKeywords || []).join(", ");
   elComp.value = (s.competitorKeywords || []).join(", ");
   elAiEnabled.value = s.aiEnabled ? "1" : "0";
-  elAiServerUrl.value = s.aiServerUrl || "http://localhost:3000";
+  elAiServerUrl.value = s.aiServerUrl || "http://localhost:3100";
   elAiModel.value = s.aiModel || "gpt-4.1";
   elScope.value = s.defaultScope || "content";
   elNoise.value = s.hideNoiseByDefault ? "1" : "0";

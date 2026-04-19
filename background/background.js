@@ -84,10 +84,23 @@ async function downloadCsv(filename, rows) {
     "更新时间"
   ];
   const csv = [header, ...rows].map((r) => r.join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url, filename, saveAs: true });
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return downloadTextFile(filename, csv, "text/csv;charset=utf-8");
+}
+
+async function downloadTextFile(filename, content, mimeType = "text/plain;charset=utf-8") {
+  const url = `data:${mimeType},${encodeURIComponent(content)}`;
+  return chrome.downloads.download({ url, filename, saveAs: false });
+}
+
+function safeFilenamePart(value, fallback = "page") {
+  const s = (value || fallback)
+    .toString()
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 80);
+  return s || fallback;
 }
 
 async function getActiveTab() {
@@ -192,6 +205,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
         return;
       }
+      if (msg?.type === "LR_EXPORT_MARKDOWN") {
+        const analysis = msg.analysis || {};
+        const built = await buildMarkdownForExport(analysis);
+        const markdown = built.markdown || "";
+        if (!markdown) throw new Error("当前页面没有可导出的 Markdown，请先分析页面");
+        const domain = safeFilenamePart(analysis.domain || "page");
+        const title = safeFilenamePart(analysis.title || "analysis");
+        const file = msg.filename || `link-radar-${domain}-${title}-${new Date().toISOString().slice(0, 10)}.md`;
+        const downloadId = await downloadTextFile(file, markdown, "text/markdown;charset=utf-8");
+        sendResponse({ ok: true, aiUsed: built.aiUsed, fallbackReason: built.fallbackReason || "", downloadId });
+        return;
+      }
+      if (msg?.type === "LR_BUILD_MARKDOWN") {
+        const built = await buildMarkdownForExport(msg.analysis || {});
+        if (!built.markdown) throw new Error("当前页面没有可复制的 Markdown，请先分析页面");
+        sendResponse({ ok: true, ...built });
+        return;
+      }
 
       sendResponse({ ok: false, error: "未知消息类型" });
     } catch (e) {
@@ -269,4 +300,98 @@ async function aiEnhance(analysis, settings) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function buildMarkdownForExport(analysis) {
+  const settings = await getSettings();
+  const fallback = analysis.pageBrief?.markdown || analysis.markdown || "";
+  if (!settings.aiEnabled) return { markdown: fallback, aiUsed: false, fallbackReason: "AI 未启用" };
+
+  try {
+    const aiMarkdown = await aiBuildMarkdown(analysis, settings);
+    if (aiMarkdown) return { markdown: aiMarkdown, aiUsed: true };
+  } catch (e) {
+    return {
+      markdown: fallback,
+      aiUsed: false,
+      fallbackReason: e?.message || String(e)
+    };
+  }
+  return { markdown: fallback, aiUsed: false, fallbackReason: "AI 未返回 Markdown" };
+}
+
+async function aiBuildMarkdown(analysis, settings) {
+  const base = (settings.aiServerUrl || "").replace(/\/+$/, "");
+  if (!base) throw new Error("aiServerUrl missing");
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45_000);
+  try {
+    const slim = slimAnalysisForAi(analysis, { includePageBrief: true, linkLimit: 35 });
+    const res = await fetch(`${base}/api/analyze`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ analysis: slim, model: settings.aiModel || "gpt-4.1", mode: "markdownExport" }),
+      signal: controller.signal
+    });
+    if (!res.ok) throw new Error(`ai server http ${res.status}`);
+    const json = await res.json();
+    if (!json?.ok) throw new Error(json?.error || "ai server error");
+    return (json.ai?.markdown || "").trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function slimAnalysisForAi(analysis, { includePageBrief = false, linkLimit = 30 } = {}) {
+  const slim = {
+    url: analysis.url,
+    title: analysis.title,
+    domain: analysis.domain,
+    pageType: analysis.pageType,
+    score: analysis.score,
+    totalLinks: analysis.totalLinks,
+    contentLinks: analysis.contentLinks,
+    competitorMentions: analysis.competitorMentions,
+    commercialSignals: analysis.commercialSignals,
+    summary: analysis.summary,
+    insights: analysis.insights,
+    ai: analysis.ai,
+    seo: analysis.seo,
+    textSample: analysis.textSample,
+    links: (analysis.links || []).slice(0, linkLimit).map((l) => ({
+      url: l.url,
+      domain: l.domain,
+      anchorText: l.anchorText,
+      location: l.location,
+      category: l.category,
+      isCompetitor: l.isCompetitor,
+      isNofollow: l.isNofollow,
+      isSponsored: l.isSponsored,
+      contextText: l.contextText
+    }))
+  };
+  if (includePageBrief) {
+    const pageBrief = analysis.pageBrief || {};
+    slim.pageBrief = {
+      highlights: pageBrief.highlights,
+      discountBanners: pageBrief.discountBanners,
+      freeButtons: pageBrief.freeButtons,
+      ctas: pageBrief.ctas,
+      headings: pageBrief.headings,
+      pageSwitches: pageBrief.pageSwitches,
+      defaultModels: pageBrief.defaultModels,
+      examples: pageBrief.examples,
+      generationHistory: pageBrief.generationHistory,
+      sidebarFeatures: pageBrief.sidebarFeatures,
+      navItems: pageBrief.navItems,
+      forms: pageBrief.forms,
+      trustSignals: pageBrief.trustSignals,
+      images: pageBrief.images,
+      visualStyle: pageBrief.visualStyle,
+      sectionTree: pageBrief.sectionTree,
+      structure: pageBrief.structure
+    };
+  }
+  return slim;
 }
