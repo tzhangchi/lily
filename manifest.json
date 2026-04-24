@@ -23,7 +23,7 @@
     "default_path": "panel/panel.html"
   },
   "options_page": "options/options.html",
-  "permissions": ["storage", "activeTab", "tabs", "downloads", "sidePanel"],
+  "permissions": ["storage", "activeTab", "tabs", "downloads", "sidePanel", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background/background.js",

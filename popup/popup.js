@@ -286,6 +286,8 @@ function renderLinks() {
   if (!analysis) return renderEmpty();
 
   const filtered = (analysis.links || []).filter((l) => passesFilter(l));
+  const allPageLinks = analysis.allPageLinks || [];
+  const previewLinks = allPageLinks.slice(0, 120);
 
   els.secLinks.innerHTML = `
     <div class="card">
@@ -314,6 +316,20 @@ function renderLinks() {
       <h3>外链列表</h3>
       ${renderLinksAccordion(filtered)}
     </div>
+
+    <div class="card">
+      <h3>网页所有超链接</h3>
+      <div class="row" style="justify-content:space-between;">
+        <div class="muted">当前页面共检测到 ${escapeHtml(String(allPageLinks.length))} 个唯一超链接（含站内/站外/mailto/tel）。</div>
+        <div class="row">
+          <button id="btnCopyAllHyperlinks" class="btn btn-primary">复制全部链接</button>
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        ${renderAllPageLinksAccordion(previewLinks)}
+      </div>
+      ${allPageLinks.length > previewLinks.length ? `<div class="muted" style="margin-top:8px;">为避免面板太重，当前仅预览前 ${previewLinks.length} 条；“复制全部链接”会复制全部。</div>` : ""}
+    </div>
   `;
 
   const sel = document.getElementById("selCategory");
@@ -331,6 +347,7 @@ function renderLinks() {
 
   wireFilterButtons();
   wireAccordion();
+  wireAllHyperlinksActions(allPageLinks);
 }
 
 function segmented(key, items) {
@@ -433,6 +450,74 @@ function wireAccordion() {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       await navigator.clipboard.writeText(btn.getAttribute("data-copy"));
+      toast("已复制链接");
+    });
+  }
+}
+
+function renderAllPageLinksAccordion(list) {
+  if (!list.length) return `<div class="muted">未检测到超链接。</div>`;
+  return `
+    <div class="accordion">
+      ${list
+        .map(
+          (l, idx) => `
+        <div class="acc-item" data-all-link="${idx}">
+          <div class="acc-head">
+            <div style="min-width:0;">
+              <div class="link-domain">${escapeHtml(l.anchorText || l.title || l.ariaLabel || "(no anchor text)")}</div>
+              <div class="small">${escapeHtml(l.href || l.rawHref || "")}</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end;">
+              <span class="badge badge-gray">${escapeHtml(l.location || "page")}</span>
+              <span class="badge badge-gray">${escapeHtml(l.protocol || "link")}</span>
+              ${l.sameDomain ? `<span class="badge badge-gray">internal</span>` : ""}
+              ${l.isExternal ? `<span class="badge badge-orange">external</span>` : ""}
+            </div>
+          </div>
+          <div class="acc-body">
+            <div class="small">${escapeHtml(l.href || l.rawHref || "")}</div>
+            <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">
+              ${l.domain ? `<span class="badge badge-gray">${escapeHtml(l.domain)}</span>` : ""}
+              ${l.title ? `<span class="badge badge-gray">title: ${escapeHtml(l.title)}</span>` : ""}
+              ${l.ariaLabel ? `<span class="badge badge-gray">aria: ${escapeHtml(l.ariaLabel)}</span>` : ""}
+            </div>
+            <div class="row" style="margin-top:10px; justify-content:flex-end;">
+              <button class="btn btn-ghost" data-open-hyperlink="${escapeHtmlAttr(l.href || l.rawHref || "")}">Open</button>
+              <button class="btn btn-ghost" data-copy-hyperlink="${escapeHtmlAttr(l.href || l.rawHref || "")}">Copy</button>
+            </div>
+          </div>
+        </div>
+      `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function wireAllHyperlinksActions(allPageLinks) {
+  const copyAllBtn = document.getElementById("btnCopyAllHyperlinks");
+  copyAllBtn?.addEventListener("click", async () => {
+    const text = allPageLinks.map((x) => x.href || x.rawHref || "").filter(Boolean).join("\n");
+    if (!text) return toast("没有可复制的链接");
+    await navigator.clipboard.writeText(text);
+    toast(`已复制 ${allPageLinks.length} 条链接`);
+  });
+
+  for (const btn of Array.from(document.querySelectorAll("[data-open-hyperlink]"))) {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const url = btn.getAttribute("data-open-hyperlink");
+      if (!url) return;
+      chrome.tabs.create({ url });
+    });
+  }
+  for (const btn of Array.from(document.querySelectorAll("[data-copy-hyperlink]"))) {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const url = btn.getAttribute("data-copy-hyperlink");
+      if (!url) return;
+      await navigator.clipboard.writeText(url);
       toast("已复制链接");
     });
   }

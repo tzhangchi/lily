@@ -109,31 +109,61 @@ async function getActiveTab() {
   return tab;
 }
 
+function isRestrictedUrl(url = "") {
+  return (
+    url.startsWith("chrome://") ||
+    url.startsWith("edge://") ||
+    url.startsWith("about:") ||
+    url.startsWith("chrome-extension://") ||
+    url.startsWith("https://chrome.google.com/webstore") ||
+    url.startsWith("https://chromewebstore.google.com/")
+  );
+}
+
+function isNoReceiverError(message = "") {
+  return /Receiving end does not exist|Could not establish connection/i.test(message);
+}
+
+async function ensureContentScript(tab) {
+  if (!tab?.id) throw new Error("找不到当前标签页");
+  if (isRestrictedUrl(tab.url || "")) {
+    throw new Error("这是 Chrome 限制页面，内容脚本无法运行（请在普通网页使用）。");
+  }
+
+  try {
+    const pong = await chrome.tabs.sendMessage(tab.id, { type: "LR_PING" });
+    if (pong?.ok) return;
+  } catch (e) {
+    if (!isNoReceiverError(e?.message || String(e))) throw e;
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: ["content/contentScript.js"]
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 120));
+}
+
 async function analyzeActiveTab() {
   const tab = await getActiveTab();
   const settings = await getSettings();
 
   let result;
   try {
+    await ensureContentScript(tab);
     result = await chrome.tabs.sendMessage(tab.id, { type: "LR_ANALYZE_PAGE", settings });
   } catch (e) {
     const msg = e?.message || String(e);
     const url = tab.url || "";
-    const restricted =
-      url.startsWith("chrome://") ||
-      url.startsWith("edge://") ||
-      url.startsWith("about:") ||
-      url.startsWith("chrome-extension://") ||
-      url.startsWith("https://chrome.google.com/webstore") ||
-      url.startsWith("https://chromewebstore.google.com/");
 
     // 关键：Receiving end does not exist => 目标页面没有注入 content script
-    if (/Receiving end does not exist|Could not establish connection/i.test(msg)) {
-      console.warn("[Lily] sendMessage failed (no receiver). url=", url, "restricted=", restricted, "err=", msg);
-      if (restricted) {
+    if (isNoReceiverError(msg)) {
+      console.warn("[Lily] sendMessage failed (no receiver). url=", url, "restricted=", isRestrictedUrl(url), "err=", msg);
+      if (isRestrictedUrl(url)) {
         throw new Error("这是 Chrome 限制页面，内容脚本无法运行（请在普通网页使用）。");
       }
-      throw new Error("内容脚本未就绪/未注入：请刷新页面后再试（或重新打开该标签页）。");
+      throw new Error("内容脚本仍未就绪：已尝试自动注入，请刷新页面后再试。");
     }
     console.warn("[Lily] sendMessage failed. url=", url, "err=", msg);
     throw new Error(msg);
@@ -153,6 +183,7 @@ async function analyzeActiveTab() {
 async function setHighlight(enabled) {
   const tab = await getActiveTab();
   const settings = await getSettings();
+  await ensureContentScript(tab);
   await chrome.tabs.sendMessage(tab.id, { type: "LR_TOGGLE_HIGHLIGHT", enabled, settings });
 }
 

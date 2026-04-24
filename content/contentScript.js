@@ -1,3 +1,6 @@
+if (!globalThis.__LILY_LINK_RADAR_CONTENT_SCRIPT__) {
+  globalThis.__LILY_LINK_RADAR_CONTENT_SCRIPT__ = true;
+
 const STATE = {
   highlighted: false,
   highlightCssInjected: false,
@@ -264,6 +267,7 @@ function analyzeLinks(settings) {
   const title = document.title || "";
   const pageHost = getHostname(pageUrl);
   const pageDomain = getRootDomain(pageHost);
+  const allPageLinks = collectAllPageLinks(pageUrl);
 
   const anchors = Array.from(document.querySelectorAll("a[href]"));
   const map = new Map(); // normalizedUrl -> extractedLink
@@ -379,6 +383,8 @@ function analyzeLinks(settings) {
     score,
     totalLinks,
     externalLinks: totalLinks,
+    allPageLinks,
+    allLinksCount: allPageLinks.length,
     contentLinks,
     competitorMentions,
     commercialSignals,
@@ -390,6 +396,63 @@ function analyzeLinks(settings) {
     analyzedAt: new Date().toISOString(),
     links
   };
+}
+
+function collectAllPageLinks(pageUrl) {
+  const pageHost = getHostname(pageUrl);
+  const items = [];
+  const seen = new Set();
+  const anchors = Array.from(document.querySelectorAll("a[href]"));
+
+  for (const a of anchors) {
+    const rawHref = (a.getAttribute("href") || "").trim();
+    if (!rawHref) continue;
+    const absolute = toAbsoluteHref(rawHref, pageUrl);
+    const key = absolute || rawHref;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+
+    const protocol = getHrefProtocol(absolute || rawHref);
+    const domain = absolute ? getRootDomain(getHostname(absolute)) : "";
+    const sameDomain = absolute ? getHostname(absolute) === pageHost : false;
+
+    items.push({
+      href: absolute || rawHref,
+      rawHref,
+      anchorText: getAnchorText(a),
+      title: cleanText(a.getAttribute("title") || ""),
+      ariaLabel: cleanText(a.getAttribute("aria-label") || ""),
+      location: getLinkLocation(a),
+      protocol,
+      domain,
+      sameDomain,
+      isExternal: absolute ? !sameDomain : false
+    });
+  }
+
+  return items;
+}
+
+function toAbsoluteHref(rawHref, baseUrl) {
+  try {
+    const u = new URL(rawHref, baseUrl);
+    if (u.protocol === "http:" || u.protocol === "https:" || u.protocol === "mailto:" || u.protocol === "tel:") {
+      return u.toString();
+    }
+    return rawHref;
+  } catch {
+    return rawHref;
+  }
+}
+
+function getHrefProtocol(href) {
+  try {
+    const u = new URL(href, location.href);
+    return u.protocol.replace(":", "");
+  } catch {
+    const idx = href.indexOf(":");
+    return idx > 0 ? href.slice(0, idx) : "relative";
+  }
 }
 
 function matchAnyKeyword(haystack, keywords = []) {
@@ -1531,6 +1594,10 @@ function disableHighlight() {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
+      if (msg?.type === "LR_PING") {
+        sendResponse({ ok: true });
+        return;
+      }
       if (msg?.type === "LR_ANALYZE_PAGE") {
         const analysis = analyzeLinks(msg.settings || {});
         sendResponse(analysis);
@@ -1550,3 +1617,4 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   })();
   return true;
 });
+}
