@@ -85,7 +85,7 @@ function renderGscUi() {
     <div class="card gsc-section-card">
       <h3>2. 抓取 GSC 核心报告</h3>
       <div class="muted gsc-section-intro">
-        适合批量保存 GSC 报告证据：Insights 查询、Search results、Indexing、CWV、富结果、Links 等会写入同一个报告目录。
+        适合批量保存 GSC 报告证据：Insights 查询、Search results 六维度、Indexing、CWV、富结果、Links 等会写入同一个报告目录。
       </div>
       <div class="kv-list">
         <div class="kv">
@@ -109,7 +109,7 @@ function renderGscUi() {
               <label class="gsc-option"><input id="gscIndexingDrilldown" type="checkbox" checked /><span><strong>Indexing 下钻</strong><small>抓取未索引原因和示例 URL。</small></span></label>
               <label class="gsc-option"><input id="gscPerformanceDrilldown" type="checkbox" checked /><span><strong>Performance Insights</strong><small>抓取 Queries 的 Top / Trending up / Trending down，以及 Content 明细。</small></span></label>
               <label class="gsc-option"><input id="gscAiReportSummary" type="checkbox" checked /><span><strong>AI 摘要</strong><small>如果 Settings 已启用 AI 且服务可用，会写入优先级摘要。</small></span></label>
-              <label class="gsc-option"><input id="gscRecursiveDiscovery" type="checkbox" checked /><span><strong>递归发现报告</strong><small>从任意 GSC 页补齐 Overview、Insights、Search results、Pages、Links 等核心报告。</small></span></label>
+              <label class="gsc-option"><input id="gscRecursiveDiscovery" type="checkbox" checked /><span><strong>递归发现报告</strong><small>从任意 GSC 页补齐 Overview、Insights、Search results、Pages、富结果、Links 等核心报告。</small></span></label>
               <label class="gsc-option"><input id="gscIncludeDetails" type="checkbox" checked /><span><strong>包含详情页</strong><small>打开报告中的 Review issues / Open report 等详情链接。</small></span></label>
             </div>
             <div class="gsc-limit-grid">
@@ -124,7 +124,7 @@ function renderGscUi() {
                 <small>用于防止一次任务跑太久。</small>
               </label>
             </div>
-            <div class="gsc-output-note">每次任务都会创建独立目录，并生成 gsc-report-index.md、manifest、每个报告的 Markdown / JSON / PNG。</div>
+            <div class="gsc-output-note">每次任务都会创建独立目录，并生成 gsc-report-index.md、manifest、每个报告的 Markdown / JSON / PNG；总索引会附带本地 SEO / 转化 / 页面质量行动计划。</div>
           </div>
         </div>
       </div>
@@ -393,6 +393,15 @@ function isPerformanceInsightsUrl(url) {
   }
 }
 
+function isPerformanceSearchAnalyticsUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.hostname === "search.google.com" && u.pathname.includes("/search-console/performance/search-analytics");
+  } catch {
+    return false;
+  }
+}
+
 function isGscOverviewUrl(url) {
   try {
     const u = new URL(url);
@@ -414,9 +423,10 @@ function getGscBaseParts(url) {
 function buildGscSeedReportUrls(currentUrl) {
   try {
     const { origin, basePath, resourceId } = getGscBaseParts(currentUrl);
-    const make = (path, label, priority = 50) => {
+    const make = (path, label, priority = 50, params = {}) => {
       const url = new URL(`${origin}${basePath}${path}`);
       url.searchParams.set("resource_id", resourceId);
+      for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
       return { url: url.toString(), label, priority };
     };
     return [
@@ -438,7 +448,17 @@ function buildGscSeedReportUrls(currentUrl) {
       make("/links", "Links", 16),
       make("/removals", "Removals", 17),
       make("/manual-actions", "Manual actions", 18),
-      make("/security-issues", "Security issues", 19)
+      make("/security-issues", "Security issues", 19),
+      make("/r/sitelinks-searchbox", "Sitelinks searchbox", 31),
+      make("/r/logo", "Logo", 32),
+      make("/r/organization", "Organization", 33),
+      make("/r/profile-page", "Profile page", 34),
+      make("/r/discussion-forum", "Discussion forum", 35),
+      make("/r/video", "Video rich results", 36),
+      make("/r/event", "Events", 37),
+      make("/r/course", "Courses", 38),
+      make("/r/software-app", "Software app", 39),
+      make("/r/dataset", "Dataset", 40)
     ];
   } catch {
     return [];
@@ -471,6 +491,16 @@ function classifyGscReportUrl(url, label = "") {
       { type: "removals", priority: 17, test: () => path.includes("/removals") },
       { type: "manual-actions", priority: 18, test: () => path.includes("/manual-actions") },
       { type: "security-issues", priority: 19, test: () => path.includes("/security-issues") },
+      { type: "sitelinks-searchbox", priority: 31, test: () => path.includes("/r/sitelinks-searchbox") },
+      { type: "logo", priority: 32, test: () => path.includes("/r/logo") },
+      { type: "organization", priority: 33, test: () => path.includes("/r/organization") },
+      { type: "profile-page", priority: 34, test: () => path.includes("/r/profile-page") },
+      { type: "discussion-forum", priority: 35, test: () => path.includes("/r/discussion-forum") },
+      { type: "video-rich-results", priority: 36, test: () => path.includes("/r/video") },
+      { type: "events", priority: 37, test: () => path.includes("/r/event") },
+      { type: "courses", priority: 38, test: () => path.includes("/r/course") },
+      { type: "software-app", priority: 39, test: () => path.includes("/r/software-app") },
+      { type: "dataset", priority: 40, test: () => path.includes("/r/dataset") },
       { type: "detail", priority: 25, test: () => /drilldown|issues|details|report|open report|review issues/.test(text) }
     ];
     const match = rules.find((rule) => rule.test());
@@ -714,6 +744,9 @@ async function captureSingleReportPage(tabId, url, folder, index, depth, options
     if (options.indexingDrilldown && isPageIndexingUrl(actualStartUrl)) {
       return await capturePageIndexingDrilldown(tabId, actualStartUrl, folder, index, depth, options);
     }
+    if (isPerformanceSearchAnalyticsUrl(actualStartUrl)) {
+      return await captureSearchAnalyticsDrilldown(tabId, actualStartUrl, folder, index, depth, options);
+    }
     if (options.performanceDrilldown && isPerformanceInsightsUrl(actualStartUrl)) {
       return await capturePerformanceInsightsDrilldown(tabId, actualStartUrl, folder, index, depth, options);
     }
@@ -741,6 +774,9 @@ async function captureSingleReportPage(tabId, url, folder, index, depth, options
       files: [mdPath, jsonPath, pngPath],
       screenshot: pngPath,
       metrics: extracted?.metrics || [],
+      recommendations: extracted?.recommendations || [],
+      issueSignals: extracted?.issueSignals || [],
+      summarySections: extracted?.summarySections || [],
       tables: extracted?.tables || [],
       cards: extracted?.cards || [],
       visibleRows: extracted?.visibleRows || [],
@@ -1071,6 +1107,101 @@ async function navigateIndexingReasonTablePage(tabId, pageNumber) {
     await sleep(900);
   }
   return { ok: true };
+}
+
+async function captureSearchAnalyticsDrilldown(tabId, startUrl, folder, index, depth) {
+  const title = "Search Results Performance Drilldown";
+  const slugBase = numberedReportSlug(index, "search-results-performance", "drilldown");
+  const files = [];
+  const targets = buildSearchAnalyticsTargets(startUrl);
+  const result = {
+    title,
+    url: startUrl,
+    depth,
+    dimensions: [],
+    startedAt: new Date().toISOString()
+  };
+
+  for (const target of targets) {
+    if (reportController.stopped) break;
+    setReportStatus(`Search results: 抓取 ${target.label}`);
+    await navigateReportTab(tabId, target.url);
+    const ready = await waitForPageCondition(tabId, pageHasPerformanceSearchAnalyticsTable, [], 30000);
+    const dimension = {
+      label: target.label,
+      breakdown: target.breakdown,
+      url: target.url,
+      rows: [],
+      headers: [],
+      errors: []
+    };
+    result.dimensions.push(dimension);
+    if (!ready?.ok) {
+      dimension.errors.push(ready?.error || "Search Analytics table did not load");
+      continue;
+    }
+
+    await runInTab(tabId, pageScrollToPerformanceSearchAnalyticsTable, []);
+    await sleep(900);
+    const extracted = await runInTab(tabId, pageExtractPerformanceSearchAnalyticsRows, [target]);
+    dimension.rows = extracted?.rows || [];
+    dimension.headers = extracted?.headers || [];
+    dimension.pagination = extracted?.pagination || "";
+    dimension.activeTab = extracted?.activeTab || "";
+    if (!dimension.rows.length) dimension.errors.push(extracted?.error || "No Search Analytics rows found");
+
+    const screenshotPath = `${folder}/${slugBase}-${safeSlug(target.label)}.png`;
+    await downloadDataUrlFile(screenshotPath, await captureReportScreenshot(tabId));
+    files.push(screenshotPath);
+    dimension.screenshot = screenshotPath;
+  }
+
+  result.finishedAt = new Date().toISOString();
+  const mdPath = `${folder}/${slugBase}.md`;
+  const jsonPath = `${folder}/${slugBase}.json`;
+  await downloadTextFile(mdPath, buildSearchAnalyticsMarkdown(result), "text/markdown;charset=utf-8");
+  await downloadTextFile(jsonPath, JSON.stringify(result, null, 2), "application/json;charset=utf-8");
+  files.push(mdPath, jsonPath);
+
+  const metrics = result.dimensions.flatMap((dimension) => (dimension.rows || []).slice(0, 12).map((row) => {
+    const values = row.values || [];
+    return `${dimension.label}: ${values.slice(0, 4).join(" | ")}`.trim();
+  })).slice(0, 100);
+
+  return {
+    url: startUrl,
+    title,
+    status: "success",
+    depth,
+    files,
+    screenshot: files.find((file) => file.endsWith(".png")) || "",
+    metrics,
+    detailUrls: [],
+    searchAnalytics: result
+  };
+}
+
+function buildSearchAnalyticsTargets(startUrl) {
+  const start = new URL(startUrl);
+  const accountPrefix = start.pathname.match(/^\/u\/\d+\//)?.[0] || "/";
+  const basePath = `${accountPrefix}search-console`;
+  const resourceId = start.searchParams.get("resource_id") || DEFAULT_PROPERTY;
+  const origin = `${start.origin}${basePath}`;
+  const make = (breakdown, label) => {
+    const url = new URL(`${origin}/performance/search-analytics`);
+    url.searchParams.set("resource_id", resourceId);
+    url.searchParams.set("breakdown", breakdown);
+    url.hash = "dimension-tables";
+    return { breakdown, label, url: url.toString() };
+  };
+  return [
+    make("query", "Queries"),
+    make("page", "Pages"),
+    make("country", "Countries"),
+    make("device", "Devices"),
+    make("searchAppearance", "Search appearance"),
+    make("date", "Dates")
+  ];
 }
 
 async function capturePerformanceInsightsDrilldown(tabId, startUrl, folder, index, depth) {
@@ -1536,6 +1667,46 @@ function pageExtractReportMetrics(detailTexts) {
     .map((el) => clean(el.innerText || el.textContent || ""))
     .filter((value) => value && value.length >= 20 && value.length <= 1200 && /\d|clicks|impressions|indexed|valid|invalid|issue|good|poor|url|pages?|网址|页面|有效|无效|问题|收录|索引/i.test(value))
     .slice(0, 40);
+  const textLines = Array.from(new Set(text.split(/\n+/).map(clean).filter(Boolean)))
+    .filter((line) => line.length >= 3 && line.length <= 320);
+  const issueSignals = textLines
+    .filter((line) => /not indexed|indexed|blocked|redirect|duplicate|canonical|noindex|crawl|404|soft 404|valid|invalid|error|warning|issue|poor|needs improvement|good|https|manual action|security|clicks|impressions|ctr|position|trending|down|up|未编入|已编入|阻止|重定向|重复|抓取|错误|警告|无效|有效|问题|较差|需要改进|良好|安全|点击|展示|排名|下降|上升/i.test(line))
+    .filter((line) => /\d|not indexed|noindex|blocked|duplicate|canonical|invalid|poor|needs improvement|manual action|security|未编入|阻止|重复|无效|较差|需要改进|安全/i.test(line))
+    .slice(0, 100);
+  const summarySections = Array.from(document.querySelectorAll(".VfPpkd-WsjYwc, .KC1dQ, section, c-wiz"))
+    .filter(visible)
+    .map((el, index) => {
+      const heading = clean(el.querySelector?.("h1,h2,h3,[role='heading'],.cPSNDf,.ZxwVRb")?.innerText || "");
+      const body = clean(el.innerText || el.textContent || "");
+      return { heading: heading || `Section ${index + 1}`, body };
+    })
+    .filter((section) => section.body.length >= 24 && section.body.length <= 1800)
+    .slice(0, 18);
+  const recommendations = [];
+  const lowerText = text.toLowerCase();
+  const pushRecommendation = (area, priority, action, evidence) => {
+    const key = `${area}|${action}`;
+    if (recommendations.some((item) => `${item.area}|${item.action}` === key)) return;
+    recommendations.push({ area, priority, action, evidence: clean(evidence || "") });
+  };
+  if (/not indexed|未编入|noindex|blocked|duplicate|canonical|soft 404|crawl/i.test(lowerText)) {
+    pushRecommendation("Indexing", "High", "优先处理未索引、noindex、canonical、重复页和抓取异常；这些问题会直接限制新增流量。", issueSignals.find((line) => /not indexed|未编入|noindex|blocked|duplicate|canonical|crawl/i.test(line)) || title);
+  }
+  if (/poor|needs improvement|inp|lcp|cls|较差|需要改进/i.test(lowerText)) {
+    pushRecommendation("Page quality", "High", "把 Core Web Vitals 问题映射到模板或 URL group，先修影响 URL 最多的移动端体验问题。", issueSignals.find((line) => /poor|needs improvement|inp|lcp|cls|较差|需要改进/i.test(line)) || title);
+  }
+  if (/invalid|critical issue|review snippets|faq|product snippets|merchant listings|breadcrumb|无效|严重问题/i.test(lowerText)) {
+    pushRecommendation("Structured data", "High", "修复富结果结构化数据错误，优先保证商品、评价、FAQ、面包屑等转化相关结果可展示。", issueSignals.find((line) => /invalid|critical|review snippets|faq|product|merchant|breadcrumb|无效/i.test(line)) || title);
+  }
+  if (/trending down|下降|clicks|impressions|ctr|position|queries|pages/i.test(lowerText)) {
+    pushRecommendation("SEO growth", "Medium", "把下降查询和页面拆成内容刷新清单：标题、首屏价值主张、FAQ、内链和 SERP intent 都要逐页复查。", issueSignals.find((line) => /trending down|下降|clicks|impressions|ctr|position/i.test(line)) || title);
+  }
+  if (/merchant listings|product snippets|review snippets|faq|product|shopping/i.test(lowerText)) {
+    pushRecommendation("Conversion", "Medium", "检查商品、评价、价格、可用性、FAQ 和可信度内容，确保搜索展示和落地页承诺一致。", issueSignals.find((line) => /merchant listings|product snippets|review snippets|faq|shopping/i.test(line)) || title);
+  }
+  if (/manual action|security issues|安全|手动处置/i.test(lowerText)) {
+    pushRecommendation("Risk", "High", "先排除手动处置和安全问题；这类问题会压制所有 SEO 和转化优化收益。", issueSignals.find((line) => /manual action|security|安全|手动/i.test(line)) || title);
+  }
 
   const norm = (s) => clean(s).toLowerCase();
   const wanted = (detailTexts || []).map(norm);
@@ -1582,6 +1753,16 @@ function pageExtractReportMetrics(detailTexts) {
         { type: "removals", priority: 17, re: /\/removals|removals/ },
         { type: "manual-actions", priority: 18, re: /\/manual-actions|manual actions/ },
         { type: "security-issues", priority: 19, re: /\/security-issues|security issues/ },
+        { type: "sitelinks-searchbox", priority: 31, re: /\/r\/sitelinks-searchbox|sitelinks searchbox/ },
+        { type: "logo", priority: 32, re: /\/r\/logo|\blogo\b/ },
+        { type: "organization", priority: 33, re: /\/r\/organization|organization/ },
+        { type: "profile-page", priority: 34, re: /\/r\/profile-page|profile page/ },
+        { type: "discussion-forum", priority: 35, re: /\/r\/discussion-forum|discussion forum/ },
+        { type: "video-rich-results", priority: 36, re: /\/r\/video|video rich|video snippets/ },
+        { type: "events", priority: 37, re: /\/r\/event|events/ },
+        { type: "courses", priority: 38, re: /\/r\/course|courses/ },
+        { type: "software-app", priority: 39, re: /\/r\/software-app|software app/ },
+        { type: "dataset", priority: 40, re: /\/r\/dataset|dataset/ },
         { type: "detail", priority: 25, re: /drilldown|review issues|open report|full report|view details/ }
       ];
       const match = rules.find((rule) => rule.re.test(joined));
@@ -1616,6 +1797,9 @@ function pageExtractReportMetrics(detailTexts) {
     metrics,
     tables,
     cards,
+    issueSignals,
+    recommendations,
+    summarySections,
     visibleRows: virtualRows.slice(0, 80),
     discoveredReports,
     textSnapshot: text.slice(0, 5000),
@@ -2286,17 +2470,17 @@ function pageExtractPerformanceInsightsContent(target) {
 
 function pageHasPerformanceSearchAnalyticsTable() {
   const text = document.body?.innerText || "";
-  const ok = /clicks|impressions|position|pages|page/i.test(text) && /https?:\/\//i.test(text);
+  const ok = /clicks|impressions|ctr|position|点击次数|展示次数|平均排名/i.test(text);
   return { ok, url: location.href, error: ok ? "" : "Performance Search Analytics table not found" };
 }
 
 function pageScrollToPerformanceSearchAnalyticsTable() {
-  const table = Array.from(document.querySelectorAll("table")).find((candidate) => /clicks|impressions|position|https?:\/\//i.test(candidate.innerText || ""));
+  const table = Array.from(document.querySelectorAll("table")).find((candidate) => /clicks|impressions|ctr|position|点击次数|展示次数|平均排名|https?:\/\//i.test(candidate.innerText || ""));
   if (table) table.scrollIntoView({ block: "start", inline: "nearest" });
   return { ok: !!table };
 }
 
-function pageExtractPerformanceSearchAnalyticsRows() {
+function pageExtractPerformanceSearchAnalyticsRows(target = {}) {
   const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
   const cleanCell = (cell) => {
     const raw = clean(cell.getAttribute("data-string-value") || cell.getAttribute("data-numeric-value") || cell.innerText || cell.textContent || "");
@@ -2312,18 +2496,24 @@ function pageExtractPerformanceSearchAnalyticsRows() {
     return { headers, values, text: clean(table.innerText || "") };
   };
   const tables = Array.from(document.querySelectorAll("table")).map(extractTable);
-  const selected = tables.find((table) => /clicks|impressions|position/i.test(table.headers.join(" ")) && /https?:\/\//i.test(table.text))
-    || tables.find((table) => /https?:\/\//i.test(table.text));
+  const selected = tables.find((table) => /clicks|impressions|ctr|position|点击次数|展示次数|平均排名/i.test(`${table.headers.join(" ")} ${table.text}`) && table.values.length)
+    || tables.find((table) => table.values.length);
   if (!selected) return { ok: false, error: "Search Analytics table not found", url: location.href, rows: [] };
   const headers = selected.headers.length ? selected.headers : ["Page", "Clicks"];
   const rows = selected.values.map((values) => {
     const url = values.find((value) => /^https?:\/\//i.test(value)) || "";
-    return { url, values };
+    return { url, dimension: values[0] || "", values };
   }).filter((row) => row.url || row.values.some(Boolean)).slice(0, 200);
+  const activeTab = Array.from(document.querySelectorAll('[aria-selected="true"], [role="tab"], a, button'))
+    .map((el) => clean(el.innerText || el.textContent || el.getAttribute("aria-label") || ""))
+    .find((label) => {
+      const wanted = clean(target?.label || target?.breakdown || "");
+      return wanted && label.toLowerCase().includes(wanted.toLowerCase().split(" ")[0]);
+    }) || "";
   const pagination = Array.from(document.querySelectorAll("div, span"))
     .map((el) => clean(el.innerText || el.textContent || ""))
     .find((value) => /^\d+\s*-\s*\d+\s+of\s+\d+$/i.test(value) || /^\d+\s*-\s*\d+\s*\/\s*\d+$/i.test(value)) || "";
-  return { ok: rows.length > 0, url: location.href, headers, rows, pagination, error: rows.length ? "" : "No Search Analytics rows found" };
+  return { ok: rows.length > 0, url: location.href, headers, rows, activeTab, pagination, error: rows.length ? "" : "No Search Analytics rows found" };
 }
 
 async function runInTab(tabId, func, args = []) {
@@ -2347,6 +2537,9 @@ function buildPageMarkdown(page) {
   const discovered = extracted.discoveredReports || [];
   const tables = extracted.tables || [];
   const cards = extracted.cards || [];
+  const recommendations = extracted.recommendations || [];
+  const issueSignals = extracted.issueSignals || [];
+  const summarySections = extracted.summarySections || [];
   const visibleRows = extracted.visibleRows || [];
   const lines = [
     `# ${page.title}`,
@@ -2364,6 +2557,16 @@ function buildPageMarkdown(page) {
     "## Headings",
     "",
     headings.map((x) => `- ${x}`).join("\n") || "- No headings extracted",
+    "",
+    "## Local action cues",
+    "",
+    recommendations.length
+      ? recommendations.map((item) => `- **${item.priority || "Medium"} / ${item.area || "Action"}**: ${item.action}${item.evidence ? ` Evidence: ${item.evidence}` : ""}`).join("\n")
+      : "- No local recommendations matched",
+    "",
+    "## Issue signals",
+    "",
+    issueSignals.length ? issueSignals.slice(0, 40).map((x) => `- ${x}`).join("\n") : "- No issue-like text signals extracted",
     "",
     "## Discovered GSC reports",
     "",
@@ -2390,6 +2593,13 @@ function buildPageMarkdown(page) {
     lines.push("## DOM Fallback Evidence", "");
     const snippets = visibleRows.length ? visibleRows : cards;
     lines.push("```text", snippets.slice(0, 24).map((row) => Array.isArray(row) ? row.join(" | ") : row).join("\n---\n"), "```", "");
+  }
+
+  if (summarySections.length) {
+    lines.push("## Extracted Report Sections", "");
+    for (const section of summarySections.slice(0, 12)) {
+      lines.push(`### ${section.heading || "Section"}`, "", "```text", (section.body || "").slice(0, 1200), "```", "");
+    }
   }
 
   lines.push("## Text snapshot", "", "```text", (extracted.textSnapshot || "").slice(0, 4000), "```", "");
@@ -2567,6 +2777,40 @@ function buildPerformanceInsightsMarkdown(report) {
   return `${lines.join("\n").trim()}\n`;
 }
 
+function buildSearchAnalyticsMarkdown(report) {
+  const lines = [
+    "# Search Results Performance Drilldown",
+    "",
+    `Source: ${report.url}`,
+    `Generated at: ${new Date().toLocaleString()}`,
+    "",
+    "This report captures the Search results table across key dimensions so SEO work can connect queries, landing pages, markets, devices, search appearance, and dates.",
+    ""
+  ];
+
+  for (const dimension of report.dimensions || []) {
+    lines.push(`## ${dimension.label}`, "");
+    lines.push(`URL: ${dimension.url}`);
+    if (dimension.screenshot) lines.push(`Screenshot: ./${dimension.screenshot.split("/").pop()}`);
+    if (dimension.activeTab) lines.push(`Active tab: ${dimension.activeTab}`);
+    if (dimension.pagination) lines.push(`Pagination: ${dimension.pagination}`);
+    if (dimension.errors?.length) lines.push("Errors:", ...dimension.errors.map((error) => `- ${error}`));
+    lines.push("");
+
+    const headers = dimension.headers?.length ? dimension.headers : ["Dimension", "Clicks", "Impressions", "CTR", "Position"];
+    lines.push(`| ${headers.map(escapeTable).join(" | ")} |`);
+    lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
+    for (const row of dimension.rows || []) {
+      const values = headers.map((_, index) => row.values?.[index] || "");
+      lines.push(`| ${values.map(escapeTable).join(" | ")} |`);
+    }
+    if (!dimension.rows?.length) lines.push(`| ${headers.map(() => "-").join(" | ")} |`);
+    lines.push("");
+  }
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
 async function buildAiGscReportSummary(job) {
   try {
     const res = await chrome.runtime.sendMessage({ type: "LR_BUILD_GSC_REPORT_INSIGHTS", job: slimGscReportJobForAi(job) });
@@ -2592,6 +2836,8 @@ function slimGscReportJobForAi(job) {
       requestedUrl: page.requestedUrl,
       status: page.status,
       metrics: (page.metrics || []).slice(0, 60),
+      recommendations: (page.recommendations || []).slice(0, 12),
+      issueSignals: (page.issueSignals || []).slice(0, 30),
       tables: (page.tables || []).slice(0, 5).map((table) => ({
         caption: table.caption,
         headers: table.headers || [],
@@ -2641,13 +2887,95 @@ function slimGscReportJobForAi(job) {
           errors: target.errors || []
         })),
         errors: page.performanceInsights.errors || []
+      } : null,
+      searchAnalytics: page.searchAnalytics ? {
+        dimensions: (page.searchAnalytics.dimensions || []).map((dimension) => ({
+          label: dimension.label,
+          headers: dimension.headers || [],
+          rows: slimRows(dimension.rows, 40),
+          errors: dimension.errors || []
+        }))
       } : null
     }))
   };
 }
 
+function buildLocalGscActionPlan(job) {
+  const pages = job.pages || [];
+  const items = [];
+  const add = (area, priority, report, action, evidence = "") => {
+    const key = `${area}|${report}|${action}`;
+    if (items.some((item) => `${item.area}|${item.report}|${item.action}` === key)) return;
+    items.push({ area, priority, report, action, evidence });
+  };
+
+  for (const page of pages) {
+    for (const rec of page.recommendations || []) {
+      add(rec.area || "SEO", rec.priority || "Medium", page.title, rec.action || "", rec.evidence || page.url);
+    }
+
+    if (page.cwv) {
+      for (const device of page.cwv.devices || []) {
+        const issues = device.issues || [];
+        const poor = issues.filter((issue) => /poor|needs improvement|较差|需要改进/i.test(`${issue.severity} ${issue.issue}`));
+        if (poor.length) {
+          const topIssue = poor[0];
+          add("Page quality", "High", page.title, `优先修 ${device.name} Core Web Vitals：${topIssue.issue || "体验问题"}，按 URL groups 合并到模板级修复。`, `${topIssue.urls || "unknown"} URLs`);
+        }
+      }
+    }
+
+    if (page.indexing) {
+      const reasons = page.indexing.reasons || [];
+      const blocked = reasons.find((reason) => /not indexed|blocked|noindex|duplicate|canonical|crawl|404|未编入|阻止|重复|抓取/i.test(`${reason.reason} ${reason.source}`));
+      if (blocked) {
+        add("Indexing", "High", page.title, `处理未索引原因：${blocked.reason || "Indexing issue"}。先看 pages 数最高的原因，再抽样 examples。`, `${blocked.pages || "unknown"} pages`);
+      }
+    }
+
+    if (page.performanceInsights) {
+      for (const target of page.performanceInsights.targets || []) {
+        const downQueries = (target.queryRows || []).filter((row) => /down/i.test(row.direction || ""));
+        if (downQueries.length) {
+          add("SEO growth", "High", page.title, `复盘下降查询：${downQueries.slice(0, 3).map((row) => row.query).join(", ")}。逐项检查搜索意图、标题、首屏、FAQ 和内链。`, target.label);
+        }
+        const upQueries = (target.queryRows || []).filter((row) => /up/i.test(row.direction || "")).slice(0, 3);
+        if (upQueries.length) {
+          add("Content expansion", "Medium", page.title, `放大上升查询：${upQueries.map((row) => row.query).join(", ")}。补专题页、比较页或模板页承接新增需求。`, target.label);
+        }
+      }
+    }
+
+    if (page.searchAnalytics) {
+      const queryDimension = (page.searchAnalytics.dimensions || []).find((dimension) => /quer/i.test(dimension.label));
+      const pageDimension = (page.searchAnalytics.dimensions || []).find((dimension) => /page/i.test(dimension.label));
+      if (queryDimension?.rows?.length) {
+        add("SEO growth", "Medium", page.title, "用 Queries 维度找高展示低点击词，优先改 title/meta/首屏承诺，提高 CTR。", (queryDimension.rows[0]?.values || []).join(" | "));
+      }
+      if (pageDimension?.rows?.length) {
+        add("Conversion", "Medium", page.title, "用 Pages 维度定位自然流量入口页，把 CTA、信任背书、FAQ 和内部推荐集中补在这些页面。", (pageDimension.rows[0]?.values || []).join(" | "));
+      }
+    }
+
+    const joined = `${page.title} ${(page.metrics || []).join(" ")} ${(page.issueSignals || []).join(" ")}`.toLowerCase();
+    if (/invalid|critical issue|无效|严重问题/.test(joined)) {
+      add("Structured data", "High", page.title, "修复无效结构化数据，优先保住富结果展示资格。", (page.issueSignals || page.metrics || [])[0] || page.url);
+    }
+    if (/manual action|security issue|手动处置|安全问题/.test(joined)) {
+      add("Risk", "High", page.title, "先排除手动处置和安全问题，再做增长优化。", (page.issueSignals || page.metrics || [])[0] || page.url);
+    }
+  }
+
+  const priorityScore = { High: 0, Medium: 1, Low: 2 };
+  return items
+    .filter((item) => item.action)
+    .sort((a, b) => (priorityScore[a.priority] ?? 9) - (priorityScore[b.priority] ?? 9) || a.area.localeCompare(b.area))
+    .slice(0, 40);
+}
+
 function buildIndexMarkdown(job) {
   const pages = job.pages || [];
+  const localPlan = buildLocalGscActionPlan(job);
   const rows = pages.map((p) => `| ${escapeTable(p.title)} | ${escapeTable(p.status)} | ${escapeTable((p.metrics || []).slice(0, 3).join("; "))} | ${reportFileLinks(pageScreenshotFiles(p))} |`).join("\n");
   const detailRows = pages.map((p) => {
     const files = p.files || [];
@@ -2670,7 +2998,26 @@ function buildIndexMarkdown(job) {
   const crawlLimitSection = job.truncated
     ? `\n\n## Crawl Limit\n\nMax pages was reached before the queue was exhausted. Increase Max pages to continue.\n\n${(job.remainingQueue || []).map((item) => `- depth ${item.depth}: ${item.url}`).join("\n") || "- Remaining queue not recorded"}\n`
     : "";
-  return `# GSC Report\n\nGenerated at: ${new Date().toLocaleString()}\n\nStatus: ${job.status || "running"}\n\nDownload folder: ${job.downloadFolder || `Downloads/${job.folder}`}\n\n这个总目录会链接本次导出的全部截图、Markdown 明细报告和 JSON 数据文件。\n${aiSection}${crawlLimitSection}\n## Summary\n\n| Report | Status | Key Findings | Screenshots |\n|---|---|---|---|\n${rows || "| - | - | - | - |"}\n\n## Detail Report Files\n\n| Report | Status | Detail Markdown | JSON Data | Screenshots |\n|---|---|---|---|---|\n${detailRows || "| - | - | - | - | - |"}\n\n## Follow-up Items\n\n${followups.map((x, i) => `${i + 1}. ${x}`).join("\n") || "No obvious follow-up items extracted."}\n\n## Seeded SEO/Growth Reports\n\n${seedRows || "- No default seed reports used"}\n\n## Discovered GSC Reports\n\n${discoveredRows || "- No discovered report links"}\n\n## Source URLs\n\n${(job.urls || []).map((u) => `- ${u}`).join("\n") || "- Current active GSC tab"}\n\n## All Downloaded Files\n\n${allFiles || "- No files exported"}\n`;
+  const localPlanRows = localPlan
+    .map((item) => `| ${escapeTable(item.priority)} | ${escapeTable(item.area)} | ${escapeTable(item.report)} | ${escapeTable(item.action)} | ${escapeTable(item.evidence)} |`)
+    .join("\n");
+  const coverageRows = buildGscCoverageRows(job)
+    .map((item) => `| ${escapeTable(item.area)} | ${escapeTable(item.coverage)} | ${escapeTable(item.why)} |`)
+    .join("\n");
+  return `# GSC Report\n\nGenerated at: ${new Date().toLocaleString()}\n\nStatus: ${job.status || "running"}\n\nDownload folder: ${job.downloadFolder || `Downloads/${job.folder}`}\n\n这个总目录会链接本次导出的全部截图、Markdown 明细报告和 JSON 数据文件。\n${aiSection}${crawlLimitSection}\n## Local SEO / Conversion / Quality Action Plan\n\n| Priority | Area | Report | Action | Evidence |\n|---|---|---|---|---|\n${localPlanRows || "| - | - | - | - | - |"}\n\n## Coverage Map\n\n| Area | Captured coverage | Why it matters |\n|---|---|---|\n${coverageRows || "| - | - | - |"}\n\n## Summary\n\n| Report | Status | Key Findings | Screenshots |\n|---|---|---|---|\n${rows || "| - | - | - | - |"}\n\n## Detail Report Files\n\n| Report | Status | Detail Markdown | JSON Data | Screenshots |\n|---|---|---|---|---|\n${detailRows || "| - | - | - | - | - |"}\n\n## Follow-up Items\n\n${followups.map((x, i) => `${i + 1}. ${x}`).join("\n") || "No obvious follow-up items extracted."}\n\n## Seeded SEO/Growth Reports\n\n${seedRows || "- No default seed reports used"}\n\n## Discovered GSC Reports\n\n${discoveredRows || "- No discovered report links"}\n\n## Source URLs\n\n${(job.urls || []).map((u) => `- ${u}`).join("\n") || "- Current active GSC tab"}\n\n## All Downloaded Files\n\n${allFiles || "- No files exported"}\n`;
+}
+
+function buildGscCoverageRows(job) {
+  const pages = job.pages || [];
+  const hasTitle = (pattern) => pages.some((page) => pattern.test(`${page.title} ${page.url}`));
+  return [
+    { area: "Demand and CTR", coverage: hasTitle(/Search Results Performance|Performance Insights/i) ? "Search Analytics dimensions + Insights queries/content" : "Missing or not loaded", why: "找高展示低点击词、上涨需求、下降查询和自然入口页。" },
+    { area: "Indexing", coverage: hasTitle(/Page Indexing/i) ? "Page Indexing reasons + examples" : "Missing or not loaded", why: "未索引页面无法贡献 SEO 流量，examples 可直接给工程排查。" },
+    { area: "Page quality", coverage: hasTitle(/Core Web Vitals/i) ? "Core Web Vitals device issues + URL groups" : "Missing or not loaded", why: "INP/LCP/CLS 影响体验、转化和搜索质量信号。" },
+    { area: "Structured data", coverage: hasTitle(/Product|Merchant|Breadcrumb|FAQ|Review|Logo|Organization|Profile|Discussion|Video|Events|Courses|Software|Dataset/i) ? "Rich result reports captured where available" : "Missing or no eligible reports discovered", why: "富结果影响 SERP 可见度、信任感和点击率。" },
+    { area: "Trust and risk", coverage: hasTitle(/HTTPS|Manual actions|Security/i) ? "HTTPS / Manual actions / Security reports" : "Missing or not loaded", why: "信任、安全和手动处置问题会压制增长与转化。" },
+    { area: "Authority and internal linking", coverage: hasTitle(/Links/i) ? "Links report" : "Missing or not loaded", why: "用外链和内部链接识别权重页、补链机会和内容集群。" }
+  ];
 }
 
 function reportFileName(file) {
@@ -2920,6 +3267,16 @@ function reportTypeFromUrl(url) {
     if (path.includes("/r/breadcrumbs")) return "breadcrumbs";
     if (path.includes("/r/faq")) return "faq";
     if (path.includes("/r/review-snippet")) return "review-snippets";
+    if (path.includes("/r/sitelinks-searchbox")) return "sitelinks-searchbox";
+    if (path.includes("/r/logo")) return "logo";
+    if (path.includes("/r/organization")) return "organization";
+    if (path.includes("/r/profile-page")) return "profile-page";
+    if (path.includes("/r/discussion-forum")) return "discussion-forum";
+    if (path.includes("/r/video")) return "video-rich-results";
+    if (path.includes("/r/event")) return "events";
+    if (path.includes("/r/course")) return "courses";
+    if (path.includes("/r/software-app")) return "software-app";
+    if (path.includes("/r/dataset")) return "dataset";
     if (path.includes("/amp")) return "amp";
     if (path.includes("/manual-actions")) return "manual-actions";
     if (path.includes("/security-issues")) return "security-issues";
