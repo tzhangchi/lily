@@ -32,17 +32,30 @@ function initGscPanel() {
 
 function renderGscUi() {
   return `
-    <div class="card">
-      <h3>Lily GSC Operator</h3>
-      <div class="small muted">${getLilySourceStamp()}</div>
-      <div class="muted">
-        自动辅助 Google Search Console URL Inspection 提交索引请求，并抓取核心报告 Markdown + 截图 + JSON 明细。
-        插件不会绕过 Google 登录，也不保证收录；请保持低频使用，避免触发 GSC 配额。
+    <div class="card gsc-operator-hero">
+      <div class="gsc-card-title-row">
+        <h3>Lily GSC Operator</h3>
+        <span class="gsc-source-badge">${getLilySourceStamp()}</span>
+      </div>
+      <div class="gsc-hero-copy">
+        用当前已登录的 Google Search Console 页签，低频辅助提交 URL Inspection，并抓取 SEO / Growth 关键报告。
+      </div>
+      <div class="gsc-quick-facts" aria-label="GSC Operator 输出说明">
+        <span>Markdown 报告</span>
+        <span>全页 PNG 截图</span>
+        <span>结构化 JSON</span>
+        <span>统一下载目录</span>
+      </div>
+      <div class="gsc-checklist">
+        <div><b>开始前确认</b>：当前页签已打开正确账号和 Property 的 GSC 页面。</div>
+        <div><b>抓取方式</b>：只复用当前页签依次跳转，不新开一堆页面。</div>
+        <div><b>输出位置</b>：Downloads/lily-gsc-reports-yyyy-mm-dd-hh-mm-ss/。</div>
       </div>
     </div>
 
-    <div class="card">
+    <div class="card gsc-section-card">
       <h3>1. 自动提交 URL Inspection</h3>
+      <div class="muted gsc-section-intro">适合把 sitemap 或 URL 列表逐个提交给 URL Inspection。插件不会绕过登录、配额或 Google 的收录判断。</div>
       <div class="kv-list">
         <label class="kv">
           <div class="k">Property</div>
@@ -58,53 +71,66 @@ function renderGscUi() {
       </div>
       <textarea id="gscUrlInput" class="input" style="min-height:140px;margin-top:10px;" placeholder="粘贴 sitemap URL、sitemap XML、或多个 URL。插件会自动提取 http/https URL。"></textarea>
       <div class="row" style="margin-top:10px;">
-        <button id="gscParseUrls" class="btn btn-ghost">Parse URLs</button>
-        <button id="gscStartSubmit" class="btn btn-primary">Start Submit</button>
-        <button id="gscPauseSubmit" class="btn btn-ghost">Pause</button>
-        <button id="gscResumeSubmit" class="btn btn-ghost">Resume</button>
-        <button id="gscStopSubmit" class="btn btn-ghost">Stop</button>
-        <button id="gscExportSubmitLog" class="btn btn-ghost">Export Log</button>
+        <button id="gscParseUrls" class="btn btn-ghost">解析 URL</button>
+        <button id="gscStartSubmit" class="btn btn-primary">开始提交</button>
+        <button id="gscPauseSubmit" class="btn btn-ghost">暂停</button>
+        <button id="gscResumeSubmit" class="btn btn-ghost">继续</button>
+        <button id="gscStopSubmit" class="btn btn-ghost">停止</button>
+        <button id="gscExportSubmitLog" class="btn btn-ghost">导出日志</button>
       </div>
       <div id="gscSubmitStatus" class="muted" style="margin-top:10px;">未开始</div>
       <div id="gscParsedUrls" class="small" style="margin-top:10px;max-height:180px;overflow:auto;"></div>
     </div>
 
-    <div class="card">
+    <div class="card gsc-section-card">
       <h3>2. 抓取 GSC 核心报告</h3>
+      <div class="muted gsc-section-intro">
+        适合批量保存 GSC 报告证据：Insights 查询、Search results、Indexing、CWV、富结果、Links 等会写入同一个报告目录。
+      </div>
       <div class="kv-list">
-        <label class="kv">
+        <div class="kv">
           <div class="k">Report URLs</div>
           <div class="v">
             <div id="gscReportUrlFields" class="gsc-report-url-fields">
               ${renderReportUrlFields(DEFAULT_REPORT_URLS)}
             </div>
             <div class="row" style="margin-top:8px;">
-              <button id="gscAddReportUrl" class="btn btn-ghost" type="button">Add URL</button>
-              <button id="gscUseCurrentReportUrl" class="btn btn-ghost" type="button">Use Current Tab</button>
+              <button id="gscAddReportUrl" class="btn btn-ghost" type="button">添加报告 URL</button>
+              <button id="gscUseCurrentReportUrl" class="btn btn-ghost" type="button">填入当前页签</button>
             </div>
-            <div class="hint">可配置多个报告 URL；执行时只复用当前页签依次跳转，不会新开页签。</div>
+            <div class="hint">留空时抓取当前 GSC 页签；也可以填多个报告 URL，Lily 会按顺序复用当前页签跳转。</div>
           </div>
-        </label>
-        <label class="kv">
+        </div>
+        <div class="kv">
           <div class="k">Options</div>
           <div class="v">
-            <label class="small"><input id="gscCwvDrilldown" type="checkbox" checked /> Core Web Vitals drilldown</label>
-            <label class="small"><input id="gscIndexingDrilldown" type="checkbox" checked /> Page Indexing drilldown</label>
-            <label class="small"><input id="gscPerformanceDrilldown" type="checkbox" checked /> Performance Insights drilldown</label>
-            <label class="small"><input id="gscAiReportSummary" type="checkbox" checked /> AI report summary when enabled</label>
-            <label class="small"><input id="gscRecursiveDiscovery" type="checkbox" checked /> Recursive SEO/growth report discovery</label>
-            <label class="small"><input id="gscIncludeDetails" type="checkbox" checked /> Include detail pages</label>
-            <div class="row" style="margin-top:8px;">
-              <input id="gscMaxDepth" class="input" style="max-width:120px;" type="number" min="0" max="3" value="2" />
-              <input id="gscMaxPages" class="input" style="max-width:120px;" type="number" min="1" max="60" value="30" />
+            <div class="gsc-option-list">
+              <label class="gsc-option"><input id="gscCwvDrilldown" type="checkbox" checked /><span><strong>CWV 下钻</strong><small>抓取 Mobile / Desktop 问题原因和 URL groups。</small></span></label>
+              <label class="gsc-option"><input id="gscIndexingDrilldown" type="checkbox" checked /><span><strong>Indexing 下钻</strong><small>抓取未索引原因和示例 URL。</small></span></label>
+              <label class="gsc-option"><input id="gscPerformanceDrilldown" type="checkbox" checked /><span><strong>Performance Insights</strong><small>抓取 Queries 的 Top / Trending up / Trending down，以及 Content 明细。</small></span></label>
+              <label class="gsc-option"><input id="gscAiReportSummary" type="checkbox" checked /><span><strong>AI 摘要</strong><small>如果 Settings 已启用 AI 且服务可用，会写入优先级摘要。</small></span></label>
+              <label class="gsc-option"><input id="gscRecursiveDiscovery" type="checkbox" checked /><span><strong>递归发现报告</strong><small>从任意 GSC 页补齐 Overview、Insights、Search results、Pages、Links 等核心报告。</small></span></label>
+              <label class="gsc-option"><input id="gscIncludeDetails" type="checkbox" checked /><span><strong>包含详情页</strong><small>打开报告中的 Review issues / Open report 等详情链接。</small></span></label>
             </div>
-            <div class="hint">请先在当前页签打开正确账号 / Property 的 GSC 报告。报告抓取只复用当前页签；从 Overview 开始时会递归发现 SEO / Growth 关键导航和卡片报告。默认下载到 Downloads/lily-gsc-reports-yyyy-mm-dd-hh-mm-ss/，gsc-report-index.md 会汇总全部截图和明细数据。</div>
+            <div class="gsc-limit-grid">
+              <label>
+                <span>递归深度</span>
+                <input id="gscMaxDepth" class="input" type="number" min="0" max="3" value="2" />
+                <small>0 只抓入口；2 会继续抓核心详情。</small>
+              </label>
+              <label>
+                <span>最多页面</span>
+                <input id="gscMaxPages" class="input" type="number" min="1" max="60" value="30" />
+                <small>用于防止一次任务跑太久。</small>
+              </label>
+            </div>
+            <div class="gsc-output-note">每次任务都会创建独立目录，并生成 gsc-report-index.md、manifest、每个报告的 Markdown / JSON / PNG。</div>
           </div>
-        </label>
+        </div>
       </div>
       <div class="row" style="margin-top:10px;">
-        <button id="gscStartReports" class="btn btn-primary">Capture Reports</button>
-        <button id="gscStopReports" class="btn btn-ghost">Stop</button>
+        <button id="gscStartReports" class="btn btn-primary">开始抓取报告</button>
+        <button id="gscStopReports" class="btn btn-ghost">停止抓取</button>
       </div>
       <div id="gscReportStatus" class="muted" style="margin-top:10px;">未开始</div>
       <div id="gscReportProgress" class="gsc-progress" hidden>
@@ -114,6 +140,13 @@ function renderGscUi() {
         </div>
         <div class="gsc-progress-track">
           <div id="gscReportProgressBar" class="gsc-progress-bar"></div>
+        </div>
+        <div id="gscReportProgressSteps" class="gsc-progress-steps" aria-label="抓取步骤">
+          <span data-gsc-progress-step="prepare">准备</span>
+          <span data-gsc-progress-step="capture">抓取</span>
+          <span data-gsc-progress-step="download">下载</span>
+          <span data-gsc-progress-step="index">索引</span>
+          <span data-gsc-progress-step="done">完成</span>
         </div>
       </div>
       <div id="gscReportFiles" class="small" style="margin-top:10px;max-height:180px;overflow:auto;"></div>
@@ -2702,17 +2735,46 @@ function renderParsedUrls(urls, results) {
   const host = document.getElementById("gscParsedUrls");
   if (!host) return;
   const byUrl = new Map((results || []).map((r) => [r.url, r]));
-  host.innerHTML = (urls || []).slice(0, 120).map((url, i) => {
+  const rows = (urls || []).slice(0, 120).map((url, i) => {
     const r = byUrl.get(url);
     const status = r ? `${r.status}: ${r.message || ""}` : "pending";
-    return `<div style="padding:4px 0;border-top:1px solid rgba(255,255,255,.06);"><b>${i + 1}.</b> ${escapeHtml(url)}<br/><span class="muted">${escapeHtml(status)}</span></div>`;
-  }).join("") || "—";
+    const tone = r?.status === "success" ? "success" : r?.status === "failed" ? "error" : r?.status === "skipped" ? "warning" : "pending";
+    return `
+      <div class="gsc-log-row">
+        <div class="gsc-log-index">${i + 1}</div>
+        <div class="gsc-log-body">
+          <div class="gsc-log-url">${escapeHtml(url)}</div>
+          <div class="gsc-log-status gsc-log-status-${tone}">${escapeHtml(status)}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+  host.innerHTML = rows ? `<div class="gsc-log-list">${rows}</div>` : `<div class="gsc-empty-state">解析后的 URL 会显示在这里。</div>`;
 }
 
 function renderReportFiles(files) {
   const host = document.getElementById("gscReportFiles");
   if (!host) return;
-  host.innerHTML = (files || []).map((f) => `<div>${escapeHtml(f)}</div>`).join("") || "—";
+  const list = uniqueStrings(files || []);
+  if (!list.length) {
+    host.innerHTML = `<div class="gsc-empty-state">开始抓取后，报告目录和下载文件会显示在这里。</div>`;
+    return;
+  }
+  const folder = list.find((f) => f.includes("/"))?.split("/")[0] || "";
+  const visibleFiles = list.slice(-100);
+  const hiddenCount = Math.max(0, list.length - visibleFiles.length);
+  host.innerHTML = `
+    ${folder ? `
+      <div class="gsc-file-summary">
+        <span>输出目录</span>
+        <strong>Downloads/${escapeHtml(folder)}/</strong>
+      </div>
+    ` : ""}
+    <div class="gsc-file-list">
+      ${visibleFiles.map(renderReportFileRow).join("")}
+    </div>
+    ${hiddenCount ? `<div class="gsc-file-more">另有 ${hiddenCount} 个较早文件已省略显示；总索引仍会完整列出。</div>` : ""}
+  `;
 }
 
 function setReportProgress(current, total, label = "") {
@@ -2725,31 +2787,86 @@ function setReportProgress(current, total, label = "") {
   const safeCurrent = Math.max(0, Math.min(Number(current) || 0, safeTotal));
   const percent = Math.max(0, Math.min(100, Math.round((safeCurrent / safeTotal) * 100)));
   root.hidden = false;
+  const step = inferReportProgressStep(label, percent);
+  root.dataset.step = step;
   if (bar) bar.style.width = `${percent}%`;
   if (labelEl) labelEl.textContent = label || "正在抓取 GSC 报告…";
   if (countEl) countEl.textContent = `${safeCurrent}/${safeTotal} · ${percent}%`;
+  updateReportProgressSteps(step);
+}
+
+function renderReportFileRow(file) {
+  const kind = getReportFileKind(file);
+  const filename = file.split("/").pop() || file;
+  return `
+    <div class="gsc-file-row" title="${escapeHtmlAttr(file)}">
+      <span class="gsc-file-kind ${kind.className}">${kind.label}</span>
+      <span class="gsc-file-name">${escapeHtml(filename)}</span>
+      <span class="gsc-file-path">${escapeHtml(file)}</span>
+    </div>
+  `;
+}
+
+function getReportFileKind(file) {
+  if (/gsc-report-index\.md$/i.test(file)) return { label: "INDEX", className: "gsc-file-index" };
+  if (/manifest\.json$/i.test(file)) return { label: "MANIFEST", className: "gsc-file-json" };
+  if (/\.md$/i.test(file)) return { label: "MD", className: "gsc-file-md" };
+  if (/\.json$/i.test(file)) return { label: "JSON", className: "gsc-file-json" };
+  if (/\.png$/i.test(file)) return { label: "PNG", className: "gsc-file-png" };
+  return { label: "FILE", className: "gsc-file-generic" };
+}
+
+function inferReportProgressStep(label, percent) {
+  const text = (label || "").toLowerCase().trim();
+  if (/索引|manifest|index/.test(text)) return "index";
+  if (/ai|摘要/.test(text)) return "index";
+  if (/下载|文件|download|已完成\s*\d+/.test(text)) return "download";
+  if (/^(完成|已停止|done|stopped)$/.test(text) || percent >= 100) return "done";
+  if (/抓取|打开|报告|insights|cwv|indexing|search analytics|capture/.test(text)) return "capture";
+  return "prepare";
+}
+
+function updateReportProgressSteps(activeStep) {
+  const order = ["prepare", "capture", "download", "index", "done"];
+  const activeIndex = Math.max(0, order.indexOf(activeStep));
+  document.querySelectorAll("[data-gsc-progress-step]").forEach((el) => {
+    const index = order.indexOf(el.getAttribute("data-gsc-progress-step") || "");
+    el.classList.toggle("is-active", index === activeIndex);
+    el.classList.toggle("is-complete", index >= 0 && index < activeIndex);
+  });
 }
 
 function formatSubmitStatus(job) {
   const ok = (job.results || []).filter((x) => x.status === "success").length;
   const failed = (job.results || []).filter((x) => x.status === "failed").length;
   const skipped = (job.results || []).filter((x) => x.status === "skipped").length;
-  return `${job.status || "running"}: ${job.results?.length || 0}/${job.total || job.urls?.length || 0}, success ${ok}, failed ${failed}, skipped ${skipped}`;
+  const status = job.status === "done" ? "完成" : job.status === "stopped" ? "已停止" : "运行中";
+  return `${status}：已处理 ${job.results?.length || 0}/${job.total || job.urls?.length || 0}，成功 ${ok}，失败 ${failed}，跳过 ${skipped}`;
 }
 
 function formatReportStatus(job) {
   const displayFolder = job.downloadFolder || (job.folder ? `Downloads/${job.folder}` : GSC_REPORT_DOWNLOAD_DISPLAY_ROOT);
-  return `${job.status || "running"}: pages ${(job.pages || []).length}, files ${(job.files || []).length}, folder ${displayFolder}`;
+  const status = job.status === "done" ? "完成" : job.status === "stopped" ? "已停止" : "运行中";
+  return `${status}：已抓取 ${(job.pages || []).length} 个报告，生成 ${(job.files || []).length} 个文件。输出目录：${displayFolder}/`;
 }
 
 function setSubmitStatus(text) {
   const el = document.getElementById("gscSubmitStatus");
-  if (el) el.textContent = text;
+  if (el) setStatusText(el, text);
 }
 
 function setReportStatus(text) {
   const el = document.getElementById("gscReportStatus");
-  if (el) el.textContent = text;
+  if (el) setStatusText(el, text);
+}
+
+function setStatusText(el, text) {
+  el.textContent = text;
+  el.classList.remove("status-error", "status-warning", "status-success", "status-running");
+  if (/失败|不是|没有|请先|不可用|error|failed/i.test(text)) el.classList.add("status-error");
+  else if (/停止|暂停|quota|配额|skipped|跳过/i.test(text)) el.classList.add("status-warning");
+  else if (/完成|已解析|已填入|已保存|success|done/i.test(text)) el.classList.add("status-success");
+  else if (/开始|运行|抓取|提交|恢复|继续|生成|打开|downloading|running/i.test(text)) el.classList.add("status-running");
 }
 
 function valueOf(id) {
@@ -2832,6 +2949,10 @@ function decodeHtml(text) {
 
 function escapeHtml(value) {
   return (value ?? "").toString().replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[m]));
+}
+
+function escapeHtmlAttr(value) {
+  return escapeHtml(value).replace(/`/g, "&#096;");
 }
 
 function escapeMd(value) {

@@ -62,9 +62,17 @@ body {
 .source-stamp {
   max-width: 104px;
   overflow-wrap: anywhere;
+  padding-top: 4px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 .source-stamp-inline {
   max-width: min(260px, 62%);
+  padding: 5px 8px;
+  border: 1px solid rgba(0, 113, 227, 0.18);
+  border-radius: 999px;
+  background: rgba(0, 113, 227, 0.07);
+  color: var(--text-primary);
+  font-weight: 650;
   text-align: right;
 }
 .side-nav { display: flex; flex-direction: column; gap: 6px; }
@@ -181,6 +189,14 @@ body {
   transition: transform 220ms ease, box-shadow 220ms ease, background 220ms ease;
 }
 .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-soft); }
+.btn:focus-visible,
+.nav-item:focus-visible,
+.input:focus-visible,
+.select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(0, 113, 227, 0.45);
+  outline-offset: 2px;
+}
 .btn-primary { background: var(--accent-blue); border-color: rgba(0, 113, 227, 0.35); color: #fff; }
 .btn-ghost { background: transparent; }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
@@ -251,7 +267,7 @@ textarea { min-height: 84px; resize: vertical; }
 .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); background: var(--bg-secondary); }
 .badge-blue { border-color: rgba(10, 132, 255, 0.35); color: var(--text-primary); }
 .badge-orange { border-color: rgba(255, 159, 10, 0.35); color: var(--text-primary); }
-.badge-red { border-color: rgba(255, 59, 48, 0.35); color: var(--text-primary); }
+.badge-red { border-color: rgba(255, 59, 48, 0.35); color: var(--text-primary); background: rgba(255, 59, 48, 0.08); }
 .badge-gray { border-color: rgba(142, 142, 147, 0.28); }
 
 .accordion { margin-top: 6px; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; background: var(--bg-primary); }

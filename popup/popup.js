@@ -278,7 +278,7 @@ function metric(k, v) {
 
 function renderMiniLink(l) {
   return `
-    <div style="padding:8px 0; border-top:1px solid rgba(255,255,255,0.06);">
+    <div style="padding:8px 0; border-top:1px solid var(--border);">
       <div class="link-domain">${escapeHtml(l.domain)}</div>
       <div class="small">${escapeHtml(l.anchorText || "(no anchor)")}</div>
       <div style="margin-top:4px; display:flex; gap:6px; flex-wrap:wrap;">
@@ -812,7 +812,7 @@ async function loadHistory() {
   el.innerHTML = list
     .map(
       (p) => `
-    <div style="padding:8px 0; border-top:1px solid rgba(255,255,255,0.06);">
+    <div style="padding:8px 0; border-top:1px solid var(--border);">
       <div style="display:flex; justify-content:space-between; gap:8px;">
         <div style="min-width:0;">
           <div class="link-domain" title="${escapeHtmlAttr(p.title || "")}">${escapeHtml(p.title || "(无标题)")}</div>
