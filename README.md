@@ -40,7 +40,7 @@ Popup 的 Save Tab 点击 **Settings**，配置：
 
 Side Panel 底部新增 **GSC Operator**：
 
-- **源码版本提示**：GSC Operator 卡片顶部会显示 `Source updated` 和扩展版本号。重新加载插件后可以用它确认当前浏览器跑的是不是最新源码。
+- **源码版本提示**：侧边栏、Overview 标题旁和 GSC Operator 卡片顶部都会显示 `Source updated` 和扩展版本号。重新加载插件后可以用它确认当前浏览器跑的是不是最新源码。
 - **自动提交 URL Inspection**：粘贴 sitemap URL、sitemap XML 或 URL 列表，Lily 会解析并逐个在 Google Search Console 中请求编入索引。
 - **抓取核心报告**：请先在当前页签打开正确账号 / Property 的 GSC 报告页；Lily 基于当前页签抓取 Markdown + PNG 截图，不会新开页签。需要抓取多个报告时，可在 Report URLs 多个输入框中分别配置 URL，Lily 会复用当前页签依次跳转。每次抓取会按 `YYYY-MM-DD_HH-mm-ss` 创建独立目录。
 - **递归发现 SEO/Growth 报告**：从 GSC Overview 开始时，Lily 会自动补充并递归发现 Search results、Discover、Pages、Videos、Sitemaps、Core Web Vitals、HTTPS、Product snippets、Merchant listings、Breadcrumbs、FAQ、Review snippets、AMP、Links、Manual actions、Security issues 等对 SEO 和商业增长重要的导航、卡片和详情报告。

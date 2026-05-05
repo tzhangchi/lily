@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS } from "../shared/constants.js";
+import { getLilySourceStamp } from "../shared/buildInfo.js";
 import { escapeCsvValue, safeLower } from "../shared/utils.js";
 
 const els = {
@@ -35,6 +36,7 @@ let linksFilter = {
 init();
 
 async function init() {
+  renderBuildStamps();
   wireActions();
   wireSideNav();
   const res = await chrome.runtime.sendMessage({ type: "LR_GET_SETTINGS" });
@@ -47,6 +49,14 @@ async function init() {
   // 交互优化：打开插件弹窗时，默认自动触发一次分析（失败不影响手动 Analyze 重试）
   // 注意：Chrome 限制页面（如 Chrome Web Store / 设置页）会返回错误提示
   runAnalyze();
+}
+
+function renderBuildStamps() {
+  const stamp = getLilySourceStamp();
+  ["sourceStamp", "overviewSourceStamp"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = stamp;
+  });
 }
 
 function wireActions() {

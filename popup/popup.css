@@ -47,6 +47,25 @@ body {
   font-weight: 700;
   letter-spacing: -0.01em;
   padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.source-stamp,
+.source-stamp-inline {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+.source-stamp {
+  max-width: 104px;
+  overflow-wrap: anywhere;
+}
+.source-stamp-inline {
+  max-width: min(260px, 62%);
+  text-align: right;
 }
 .side-nav { display: flex; flex-direction: column; gap: 6px; }
 .nav-item {

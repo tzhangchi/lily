@@ -10,7 +10,10 @@
   <body>
     <div class="layout">
       <aside class="sidebar">
-        <div class="side-brand">Lily</div>
+        <div class="side-brand">
+          <span>Lily</span>
+          <span id="sourceStamp" class="source-stamp">Source updated: loading…</span>
+        </div>
         <nav class="side-nav">
           <button class="nav-item nav-item-active" data-jump="sec-overview">Overview</button>
           <button class="nav-item" data-jump="sec-links">Links</button>
@@ -41,7 +44,10 @@
           <div class="content">
             <div class="sections">
               <section class="section">
-                <div class="section-head"><h2>Overview</h2></div>
+                <div class="section-head">
+                  <h2>Overview</h2>
+                  <div id="overviewSourceStamp" class="source-stamp-inline"></div>
+                </div>
                 <div id="sec-overview" class="section-body"></div>
               </section>
 
