@@ -36,7 +36,17 @@ Popup 的 Save Tab 点击 **Settings**，配置：
 - 右下角 **Export CSV**：导出“已保存”的页面库。
 - 右下角 **Export MD**：导出当前页面关键信息与 HTML 阅读版 Markdown。
 
-## 5) 说明（V1 范围）
+## 5) GSC Operator
+
+Side Panel 底部新增 **GSC Operator**：
+
+- **自动提交 URL Inspection**：粘贴 sitemap URL、sitemap XML 或 URL 列表，Lily 会解析并逐个在 Google Search Console 中请求编入索引。
+- **抓取核心报告**：默认抓取 Page Indexing、Core Web Vitals、Performance Insights，输出 Markdown + PNG 截图。
+- 报告默认下载到：`Downloads/lily-gsc-reports/YYYY-MM-DD_HH-mm-ss/`
+
+说明：Chrome 插件不能静默写入用户 Desktop 任意目录；如果需要固定写桌面目录，需要额外做 Native Messaging 或让用户通过 File System Access API 主动选择目录。插件不会绕过 Google 登录或配额，只在用户已登录 Search Console 的浏览器环境中做低频辅助操作。
+
+## 6) 说明（V1 范围）
 
 V1 使用规则引擎（本地）：
 - 外链提取 + 去重 + URL 归一化（移除 hash/常见追踪参数）
