@@ -41,10 +41,11 @@ Popup 的 Save Tab 点击 **Settings**，配置：
 Side Panel 底部新增 **GSC Operator**：
 
 - **自动提交 URL Inspection**：粘贴 sitemap URL、sitemap XML 或 URL 列表，Lily 会解析并逐个在 Google Search Console 中请求编入索引。
-- **抓取核心报告**：默认抓取 Page Indexing、Core Web Vitals、Performance Insights，输出 Markdown + PNG 截图。
+- **抓取核心报告**：请先在当前页签打开正确账号 / Property 的 GSC 报告页；Lily 基于当前页签抓取 Markdown + PNG 截图，不会新开页签。需要抓取多个报告时，可在 Report URLs 多个输入框中分别配置 URL，Lily 会复用当前页签依次跳转。
+- **Core Web Vitals 下钻**：遇到 Core Web Vitals summary 页面时，会复用当前页签依次打开 Mobile / Desktop 的 Open report，抓取 “Why URLs aren't considered good” 问题表，并逐行点击原因进入 URL groups 明细表导出。
 - 报告默认下载到：`Downloads/lily-gsc-reports/YYYY-MM-DD_HH-mm-ss/`
 
-说明：Chrome 插件不能静默写入用户 Desktop 任意目录；如果需要固定写桌面目录，需要额外做 Native Messaging 或让用户通过 File System Access API 主动选择目录。插件不会绕过 Google 登录或配额，只在用户已登录 Search Console 的浏览器环境中做低频辅助操作。
+说明：Chrome 插件不能静默写入用户 Desktop 任意目录；如果需要固定写桌面目录，需要额外做 Native Messaging 或让用户通过 File System Access API 主动选择目录。插件不会绕过 Google 登录或配额，只在用户已登录 Search Console 的浏览器环境中做低频辅助操作。GSC 报告抓取默认假定当前页签已经打开目标报告，以避免新页签触发多账号切换。
 
 ## 6) 说明（V1 范围）
 

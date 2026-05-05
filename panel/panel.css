@@ -224,6 +224,22 @@ textarea { min-height: 84px; resize: vertical; }
 .kv .k { font-size: 11px; color: var(--text-secondary); padding-top: 2px; }
 .kv .v { font-size: 12px; color: var(--text-primary); word-break: break-word; }
 .kv .hint { margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
+.gsc-report-url-fields { display: flex; flex-direction: column; gap: 8px; }
+.gsc-report-url-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
+  align-items: center;
+}
+.gsc-report-url-label {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gsc-report-url-remove { padding: 8px 10px; }
 .issue-list { display: flex; flex-direction: column; gap: 10px; }
 .issue { display: flex; gap: 10px; align-items: flex-start; }
 .issue-text { font-size: 12px; color: var(--text-primary); line-height: 1.5; }
