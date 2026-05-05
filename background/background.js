@@ -3,7 +3,8 @@ import { escapeCsvValue, nowIso } from "../shared/utils.js";
 
 const STORAGE_KEYS = {
   settings: "lr_settings",
-  saved: "lr_saved_pages" // { [url]: SavedPage }
+  saved: "lr_saved_pages", // { [url]: SavedPage }
+  aiStatus: "lr_ai_server_status"
 };
 
 async function getSettings() {
@@ -197,7 +198,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg?.type === "LR_SET_SETTINGS") {
         const next = { ...DEFAULT_SETTINGS, ...(msg.settings || {}) };
         await setSettings(next);
+        checkAiServerHealth(next).catch(() => {});
         sendResponse({ ok: true, settings: next });
+        return;
+      }
+      if (msg?.type === "LR_GET_AI_STATUS") {
+        const data = await chrome.storage.local.get(STORAGE_KEYS.aiStatus);
+        sendResponse({ ok: true, status: data[STORAGE_KEYS.aiStatus] || null });
+        return;
+      }
+      if (msg?.type === "LR_PROBE_AI_SERVER") {
+        sendResponse({ ok: true, status: await checkAiServerHealth(await getSettings()) });
         return;
       }
       if (msg?.type === "LR_ANALYZE_ACTIVE_TAB") {
@@ -254,6 +265,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true, ...built });
         return;
       }
+      if (msg?.type === "LR_BUILD_GSC_REPORT_INSIGHTS") {
+        const settings = await getSettings();
+        if (!settings.aiEnabled) {
+          sendResponse({ ok: false, error: "AI 未启用" });
+          return;
+        }
+        const ai = await aiBuildGscReportInsights(msg.job || {}, settings);
+        sendResponse({ ok: true, ai });
+        return;
+      }
 
       sendResponse({ ok: false, error: "未知消息类型" });
     } catch (e) {
@@ -271,6 +292,11 @@ try {
   chrome.runtime.onInstalled?.addListener(() => {
     // 新版 Chrome 支持：点击扩展图标自动打开 side panel
     chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
+    checkAiServerHealth().catch(() => {});
+  });
+
+  chrome.runtime.onStartup?.addListener(() => {
+    checkAiServerHealth().catch(() => {});
   });
 
   // 兼容：如果 setPanelBehavior 不可用，则用 onClicked 手动打开
@@ -283,6 +309,46 @@ try {
   });
 } catch {
   // ignore
+}
+
+async function checkAiServerHealth(settingsArg) {
+  const settings = settingsArg || await getSettings();
+  const base = (settings.aiServerUrl || "").replace(/\/+$/, "");
+  const status = {
+    enabled: !!settings.aiEnabled,
+    base,
+    ok: false,
+    service: "",
+    error: "",
+    checkedAt: nowIso()
+  };
+  if (!status.enabled) {
+    status.error = "AI 未启用";
+    await chrome.storage.local.set({ [STORAGE_KEYS.aiStatus]: status });
+    return status;
+  }
+  if (!base) {
+    status.error = "aiServerUrl missing";
+    await chrome.storage.local.set({ [STORAGE_KEYS.aiStatus]: status });
+    return status;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4_000);
+  try {
+    const res = await fetch(`${base}/api/health`, { method: "GET", signal: controller.signal });
+    if (!res.ok) throw new Error(`ai server health http ${res.status}`);
+    const json = await res.json().catch(() => ({}));
+    status.ok = !!json?.ok;
+    status.service = json?.service || "";
+    if (!status.ok) status.error = json?.error || "AI server health returned not ok";
+  } catch (e) {
+    status.error = e?.message || String(e);
+  } finally {
+    clearTimeout(timer);
+  }
+  await chrome.storage.local.set({ [STORAGE_KEYS.aiStatus]: status });
+  return status;
 }
 
 async function aiEnhance(analysis, settings) {
@@ -369,6 +435,34 @@ async function aiBuildMarkdown(analysis, settings) {
     const json = await res.json();
     if (!json?.ok) throw new Error(json?.error || "ai server error");
     return (json.ai?.markdown || "").trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function aiBuildGscReportInsights(job, settings) {
+  const base = (settings.aiServerUrl || "").replace(/\/+$/, "");
+  if (!base) throw new Error("aiServerUrl missing");
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  try {
+    const analysis = {
+      url: (job.urls || [])[0] || "https://search.google.com/search-console",
+      title: "Google Search Console report",
+      domain: "llamagen.ai",
+      gscReport: job
+    };
+    const res = await fetch(`${base}/api/analyze`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ analysis, model: settings.aiModel || "gpt-4.1", mode: "gscReportSummary" }),
+      signal: controller.signal
+    });
+    if (!res.ok) throw new Error(`ai server http ${res.status}`);
+    const json = await res.json();
+    if (!json?.ok) throw new Error(json?.error || "ai server error");
+    return json.ai;
   } finally {
     clearTimeout(timer);
   }

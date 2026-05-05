@@ -52,7 +52,9 @@ export async function POST(req) {
     const ai =
       mode === "markdownExport"
         ? await exportMarkdownWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment, analysis })
-        : await enhanceWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment, analysis });
+        : mode === "gscReportSummary"
+          ? await summarizeGscReportWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment, analysis })
+          : await enhanceWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment, analysis });
 
     return Response.json({ ok: true, ai }, { headers: corsHeaders() });
   } catch (e) {
@@ -133,6 +135,46 @@ async function exportMarkdownWithAzureOpenAI({ endpoint, apiKey, apiVersion, dep
   return {
     markdown: String(parsed.markdown || "").trim(),
     notes: Array.isArray(parsed.notes) ? parsed.notes.slice(0, 8) : []
+  };
+}
+
+async function summarizeGscReportWithAzureOpenAI({ endpoint, apiKey, apiVersion, deployment, analysis }) {
+  const url = `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+  const prompt = buildGscReportPrompt(analysis.gscReport || analysis);
+
+  const body = {
+    temperature: 0.15,
+    max_tokens: 3200,
+    messages: [
+      {
+        role: "system",
+        content:
+          "你是一个面向增长和技术 SEO 的 GSC 报告分析助手。你必须只输出 JSON，不允许输出代码块、解释文字或 JSON 之外的内容。"
+      },
+      { role: "user", content: prompt }
+    ]
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "api-key": apiKey
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`azure openai http ${res.status}: ${t.slice(0, 300)}`);
+  }
+  const json = await res.json();
+  const content = json?.choices?.[0]?.message?.content || "";
+  const parsed = safeJsonParse(content);
+  if (!parsed?.markdown) throw new Error("model did not return gsc markdown json");
+  return {
+    markdown: String(parsed.markdown || "").trim(),
+    priorityActions: Array.isArray(parsed.priorityActions) ? parsed.priorityActions.slice(0, 12) : [],
+    risks: Array.isArray(parsed.risks) ? parsed.risks.slice(0, 12) : []
   };
 }
 
@@ -317,6 +359,42 @@ function buildMarkdownPrompt(a) {
     ),
     "",
     "强约束：只输出 JSON。JSON 里的 markdown 字段可以包含 Markdown 文本。"
+  ].join("\n");
+}
+
+function buildGscReportPrompt(report) {
+  const compact = JSON.stringify(report, null, 2).slice(0, 52000);
+  return [
+    "请基于 Google Search Console 抓取结果，输出一份面向 llamagen.ai 团队的优先级优化摘要。",
+    "",
+    "必须分析这些维度（如果数据存在）：",
+    "- Core Web Vitals：Mobile/Desktop 的 Poor / Need improvement issue，URL groups，影响 URL 数。",
+    "- Page Indexing：Why pages aren't indexed 的原因、Pages 数、Examples URL 和 Last crawled。",
+    "- Performance Insights：Top、Trending up、Trending down，尤其最近 7 天下降页面和 Search Analytics page breakdown。",
+    "- 其他 SEO/Growth 报告：Search results、Discover、Videos、Sitemaps、HTTPS、Links、Product snippets、Merchant listings、Breadcrumbs、FAQ、Review snippets、AMP、Manual actions、Security issues。",
+    "- 通用表格和发现链接：从 tables、metrics、discoveredReports 中识别商业增长、索引覆盖、富结果资格、站点体验和风险信号。",
+    "",
+    "输出要求：",
+    "- 中文为主，保留原始英文 issue/reason/page URL。",
+    "- 按优先级排序，明确哪些问题最影响增长。",
+    "- 对每个行动建议写：问题、影响、证据、建议动作、负责人建议（SEO/前端/内容/后端）、优先级。",
+    "- 不要编造报告里没有的数值；如果数值缺失，写“报告未提供”。",
+    "",
+    "你必须输出 JSON：",
+    JSON.stringify(
+      {
+        markdown: "完整 Markdown 摘要，含 Executive Summary、Priority Actions、Evidence、Next Checks",
+        priorityActions: ["最高优先级行动列表"],
+        risks: ["需要注意的数据/抓取风险"]
+      },
+      null,
+      2
+    ),
+    "",
+    "【GSC 报告 JSON（可能截断）】",
+    compact,
+    "",
+    "强约束：只输出 JSON。"
   ].join("\n");
 }
 

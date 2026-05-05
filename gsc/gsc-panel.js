@@ -8,6 +8,8 @@ const DEFAULT_ALLOW_DOMAINS = ["llamagen.ai", "www.llamagen.ai"];
 const DEFAULT_REPORT_URLS = [];
 const DEFAULT_REPORT_FIELD_COUNT = 3;
 const REPORT_URL_PLACEHOLDER = "留空则抓取当前已打开的 GSC 报告页";
+const GSC_REPORT_DOWNLOAD_ROOT = "lily-gsc-reports";
+const GSC_REPORT_DOWNLOAD_DISPLAY_ROOT = `Downloads/${GSC_REPORT_DOWNLOAD_ROOT}`;
 
 const REQUEST_INDEXING_TEXTS = ["Request indexing", "请求编入索引"];
 const CLOSE_TEXTS = ["Got it", "Close", "关闭", "完成"];
@@ -31,7 +33,7 @@ function renderGscUi() {
     <div class="card">
       <h3>Lily GSC Operator</h3>
       <div class="muted">
-        自动辅助 Google Search Console URL Inspection 提交索引请求，并抓取核心报告 Markdown + 截图。
+        自动辅助 Google Search Console URL Inspection 提交索引请求，并抓取核心报告 Markdown + 截图 + JSON 明细。
         插件不会绕过 Google 登录，也不保证收录；请保持低频使用，避免触发 GSC 配额。
       </div>
     </div>
@@ -84,12 +86,16 @@ function renderGscUi() {
           <div class="k">Options</div>
           <div class="v">
             <label class="small"><input id="gscCwvDrilldown" type="checkbox" checked /> Core Web Vitals drilldown</label>
+            <label class="small"><input id="gscIndexingDrilldown" type="checkbox" checked /> Page Indexing drilldown</label>
+            <label class="small"><input id="gscPerformanceDrilldown" type="checkbox" checked /> Performance Insights drilldown</label>
+            <label class="small"><input id="gscAiReportSummary" type="checkbox" checked /> AI report summary when enabled</label>
+            <label class="small"><input id="gscRecursiveDiscovery" type="checkbox" checked /> Recursive SEO/growth report discovery</label>
             <label class="small"><input id="gscIncludeDetails" type="checkbox" checked /> Include detail pages</label>
             <div class="row" style="margin-top:8px;">
               <input id="gscMaxDepth" class="input" style="max-width:120px;" type="number" min="0" max="3" value="2" />
               <input id="gscMaxPages" class="input" style="max-width:120px;" type="number" min="1" max="60" value="30" />
             </div>
-            <div class="hint">请先在当前页签打开正确账号 / Property 的 GSC 报告。报告抓取只复用当前页签，默认下载到 Downloads/lily-gsc-reports/时间戳/。</div>
+            <div class="hint">请先在当前页签打开正确账号 / Property 的 GSC 报告。报告抓取只复用当前页签；从 Overview 开始时会递归发现 SEO / Growth 关键导航和卡片报告。默认下载到 Downloads/lily-gsc-reports/时间戳/，gsc-report-index.md 会汇总全部截图和明细数据。</div>
           </div>
         </label>
       </div>
@@ -318,6 +324,119 @@ function isCoreWebVitalsUrl(url) {
   }
 }
 
+function isPageIndexingUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.hostname === "search.google.com" && u.pathname.includes("/search-console/index");
+  } catch {
+    return false;
+  }
+}
+
+function isPerformanceInsightsUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.hostname === "search.google.com" && u.pathname.includes("/search-console/performance/insights");
+  } catch {
+    return false;
+  }
+}
+
+function isGscOverviewUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== "search.google.com") return false;
+    return /\/search-console\/?$/.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function getGscBaseParts(url) {
+  const u = new URL(url);
+  const accountPrefix = u.pathname.match(/^\/u\/\d+\//)?.[0] || "/";
+  const basePath = `${accountPrefix}search-console`;
+  const resourceId = u.searchParams.get("resource_id") || DEFAULT_PROPERTY;
+  return { origin: u.origin, basePath, resourceId };
+}
+
+function buildGscSeedReportUrls(currentUrl) {
+  try {
+    const { origin, basePath, resourceId } = getGscBaseParts(currentUrl);
+    const make = (path, label, priority = 50) => {
+      const url = new URL(`${origin}${basePath}${path}`);
+      url.searchParams.set("resource_id", resourceId);
+      return { url: url.toString(), label, priority };
+    };
+    return [
+      make("", "Overview", 1),
+      make("/performance/insights", "Insights", 2),
+      make("/performance/search-analytics", "Search results", 3),
+      make("/performance/discover", "Discover", 4),
+      make("/index", "Pages", 5),
+      make("/video-index", "Videos", 6),
+      make("/sitemaps", "Sitemaps", 7),
+      make("/core-web-vitals", "Core Web Vitals", 8),
+      make("/https", "HTTPS", 9),
+      make("/r/product", "Product snippets", 10),
+      make("/r/merchant-listings", "Merchant listings", 11),
+      make("/r/breadcrumbs", "Breadcrumbs", 12),
+      make("/r/faq", "FAQ", 13),
+      make("/r/review-snippet", "Review snippets", 14),
+      make("/amp", "AMP", 15),
+      make("/links", "Links", 16),
+      make("/removals", "Removals", 17),
+      make("/manual-actions", "Manual actions", 18),
+      make("/security-issues", "Security issues", 19)
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function classifyGscReportUrl(url, label = "") {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== "search.google.com" || !/\/search-console(\/|$)/.test(u.pathname)) return null;
+    const path = u.pathname;
+    const text = `${path} ${label}`.toLowerCase();
+    const rules = [
+      { type: "overview", priority: 1, test: () => /\/search-console\/?$/.test(path) },
+      { type: "performance-insights", priority: 2, test: () => path.includes("/performance/insights") },
+      { type: "performance-search-analytics", priority: 3, test: () => path.includes("/performance/search-analytics") },
+      { type: "performance-discover", priority: 4, test: () => path.includes("/performance/discover") },
+      { type: "page-indexing", priority: 5, test: () => path.includes("/search-console/index") },
+      { type: "video-indexing", priority: 6, test: () => path.includes("/video-index") },
+      { type: "sitemaps", priority: 7, test: () => path.includes("/sitemaps") },
+      { type: "core-web-vitals", priority: 8, test: () => path.includes("/core-web-vitals") },
+      { type: "https", priority: 9, test: () => path.includes("/https") },
+      { type: "product-snippets", priority: 10, test: () => path.includes("/r/product") },
+      { type: "merchant-listings", priority: 11, test: () => path.includes("/r/merchant-listings") },
+      { type: "breadcrumbs", priority: 12, test: () => path.includes("/r/breadcrumbs") },
+      { type: "faq", priority: 13, test: () => path.includes("/r/faq") },
+      { type: "review-snippets", priority: 14, test: () => path.includes("/r/review-snippet") },
+      { type: "amp", priority: 15, test: () => path.includes("/amp") },
+      { type: "links", priority: 16, test: () => path.includes("/links") },
+      { type: "removals", priority: 17, test: () => path.includes("/removals") },
+      { type: "manual-actions", priority: 18, test: () => path.includes("/manual-actions") },
+      { type: "security-issues", priority: 19, test: () => path.includes("/security-issues") },
+      { type: "detail", priority: 25, test: () => /drilldown|issues|details|report|open report|review issues/.test(text) }
+    ];
+    const match = rules.find((rule) => rule.test());
+    if (!match) return null;
+    return { ...match, url: u.toString(), label };
+  } catch {
+    return null;
+  }
+}
+
+function isImportantGscReportUrl(url, label = "") {
+  const classified = classifyGscReportUrl(url, label);
+  if (!classified) return false;
+  const blocked = /\/settings|\/achievements|\/url-inspection|\/not-verified|privacy|termsofservice|accounts\.google\.com|support\.google\.com/i;
+  return !blocked.test(url);
+}
+
 function alignGoogleAccountPath(url, currentUrl) {
   try {
     const target = new URL(url);
@@ -331,9 +450,30 @@ function alignGoogleAccountPath(url, currentUrl) {
       target.pathname = target.pathname.replace(/^\/u\/\d+\//, currentAccount);
       return target.toString();
     }
+    if (target.pathname.startsWith("/search-console")) {
+      target.pathname = `${currentAccount.replace(/\/$/, "")}${target.pathname}`;
+      return target.toString();
+    }
     return url;
   } catch {
     return url;
+  }
+}
+
+function canonicalGscUrlKey(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== "search.google.com") return url || "";
+    u.hash = "";
+    for (const key of Array.from(u.searchParams.keys())) {
+      if (/^utm_/i.test(key) || ["hl", "pli", "original_url", "original_resource_id"].includes(key)) u.searchParams.delete(key);
+    }
+    const params = Array.from(u.searchParams.entries()).sort(([a], [b]) => a.localeCompare(b));
+    u.search = "";
+    for (const [key, value] of params) u.searchParams.append(key, value);
+    return u.toString();
+  } catch {
+    return url || "";
   }
 }
 
@@ -431,6 +571,10 @@ async function runReportCaptureJob() {
   const inputUrls = getReportInputUrls();
   const urls = inputUrls.length ? inputUrls.map((url) => alignGoogleAccountPath(url, currentUrl)) : [currentUrl].filter(Boolean);
   const cwvDrilldown = !!document.getElementById("gscCwvDrilldown")?.checked;
+  const indexingDrilldown = !!document.getElementById("gscIndexingDrilldown")?.checked;
+  const performanceDrilldown = !!document.getElementById("gscPerformanceDrilldown")?.checked;
+  const aiReportSummary = !!document.getElementById("gscAiReportSummary")?.checked;
+  const recursiveDiscovery = !!document.getElementById("gscRecursiveDiscovery")?.checked;
   const includeDetails = !!document.getElementById("gscIncludeDetails")?.checked;
   const maxDepth = clampInt(valueOf("gscMaxDepth"), 0, 3, 2);
   const maxPages = clampInt(valueOf("gscMaxPages"), 1, 60, 30);
@@ -438,41 +582,63 @@ async function runReportCaptureJob() {
   if (!urls.length) return setReportStatus("请先在当前页签打开 GSC 报告页，或粘贴要在当前页签中抓取的报告 URL");
   if (!inputUrls.length && !isSearchConsoleUrl(currentUrl)) return setReportStatus("当前页签不是 GSC 报告页，请先打开正确的 Search Console 页面");
 
-  const folder = `lily-gsc-reports/${formatLocalTimestamp(new Date())}`;
-  const job = { type: "reports", urls, files: [], pages: [], status: "running", startedAt: new Date().toISOString(), folder, tabId: activeTab.id };
+  const seedSourceUrl = [currentUrl, ...urls].find((candidate) => isGscOverviewUrl(candidate));
+  const seedReports = recursiveDiscovery && seedSourceUrl ? buildGscSeedReportUrls(seedSourceUrl) : [];
+  const queueUrls = uniqueStrings([...urls, ...seedReports.map((seed) => alignGoogleAccountPath(seed.url, currentUrl))]).slice(0, maxPages);
+
+  const folder = buildGscReportFolderName(new Date());
+  const job = { type: "reports", urls, seedReports, recursiveDiscovery, files: [], pages: [], status: "running", startedAt: new Date().toISOString(), folder, downloadFolder: `Downloads/${folder}`, tabId: activeTab.id };
   await saveReportJob(job);
 
-  const queue = urls.map((url) => ({ url, depth: 0, source: "entry" }));
+  const queue = queueUrls.map((url) => ({ url, depth: 0, source: seedReports.some((seed) => canonicalGscUrlKey(alignGoogleAccountPath(seed.url, currentUrl)) === canonicalGscUrlKey(url)) ? "seed" : "entry" }));
   const seen = new Set();
   while (queue.length && job.pages.length < maxPages && !reportController.stopped) {
     const item = queue.shift();
-    if (!item?.url || seen.has(item.url)) continue;
-    seen.add(item.url);
+    const itemKey = canonicalGscUrlKey(item?.url || "");
+    if (!item?.url || seen.has(itemKey)) continue;
+    seen.add(itemKey);
     setReportStatus(`抓取 ${job.pages.length + 1}/${maxPages}: ${item.url}`);
 
-    const page = await captureSingleReportPage(activeTab.id, item.url, folder, job.pages.length + 1, item.depth, { cwvDrilldown, maxPages });
+    const page = await captureSingleReportPage(activeTab.id, item.url, folder, job.pages.length + 1, item.depth, { cwvDrilldown, indexingDrilldown, performanceDrilldown, recursiveDiscovery, maxPages });
     job.pages.push(page);
     job.files.push(...(page.files || []));
     renderReportFiles(job.files);
     await saveReportJob(job);
 
-    if (includeDetails && item.depth < maxDepth && page.detailUrls?.length) {
-      for (const detailUrl of page.detailUrls) {
+    const candidateUrls = uniqueStrings([
+      ...(includeDetails ? (page.detailUrls || []) : []),
+      ...(recursiveDiscovery ? (page.discoveredReports || []).map((report) => report.url) : [])
+    ]);
+    if (candidateUrls.length && item.depth < maxDepth) {
+      for (const detailUrl of candidateUrls) {
         const alignedDetailUrl = alignGoogleAccountPath(detailUrl, currentUrl);
-        if (!seen.has(alignedDetailUrl) && queue.length + job.pages.length < maxPages) queue.push({ url: alignedDetailUrl, depth: item.depth + 1, source: item.url });
+        const detailKey = canonicalGscUrlKey(alignedDetailUrl);
+        if (!isImportantGscReportUrl(alignedDetailUrl)) continue;
+        if (!seen.has(detailKey) && !queue.some((queued) => canonicalGscUrlKey(queued.url) === detailKey) && queue.length + job.pages.length < maxPages) {
+          queue.push({ url: alignedDetailUrl, depth: item.depth + 1, source: item.url });
+        }
       }
     }
   }
 
-  const indexMd = buildIndexMarkdown(job);
-  const manifest = JSON.stringify(job, null, 2);
-  const indexPath = `${folder}/index.md`;
-  const manifestPath = `${folder}/manifest.json`;
-  await downloadTextFile(indexPath, indexMd, "text/markdown;charset=utf-8");
-  await downloadTextFile(manifestPath, manifest, "application/json;charset=utf-8");
-  job.files.push(indexPath, manifestPath);
+  const indexPath = `${folder}/gsc-report-index.md`;
+  const manifestPath = `${folder}/gsc-report-manifest.json`;
   job.status = reportController.stopped ? "stopped" : "done";
   job.finishedAt = new Date().toISOString();
+  job.truncated = queue.length > 0 && job.pages.length >= maxPages;
+  job.remainingQueue = queue.slice(0, 20).map((item) => ({ url: item.url, depth: item.depth, source: item.source }));
+  job.files = uniqueStrings([...job.files, indexPath, manifestPath]);
+
+  if (aiReportSummary && !reportController.stopped) {
+    const ai = await buildAiGscReportSummary(job);
+    if (ai?.ok) job.aiSummary = ai.ai;
+    else if (ai?.error && !/AI 未启用|ai server/i.test(ai.error)) job.aiSummaryError = ai.error;
+  }
+
+  const indexMd = buildIndexMarkdown(job);
+  const manifest = JSON.stringify(job, null, 2);
+  await downloadTextFile(indexPath, indexMd, "text/markdown;charset=utf-8");
+  await downloadTextFile(manifestPath, manifest, "application/json;charset=utf-8");
   await saveReportJob(job);
   setReportStatus(formatReportStatus(job));
   renderReportFiles(job.files);
@@ -486,33 +652,63 @@ async function captureSingleReportPage(tabId, url, folder, index, depth, options
     if (options.cwvDrilldown && isCoreWebVitalsUrl(actualStartUrl)) {
       return await captureCoreWebVitalsDrilldown(tabId, actualStartUrl, folder, index, depth, options);
     }
+    if (options.indexingDrilldown && isPageIndexingUrl(actualStartUrl)) {
+      return await capturePageIndexingDrilldown(tabId, actualStartUrl, folder, index, depth, options);
+    }
+    if (options.performanceDrilldown && isPerformanceInsightsUrl(actualStartUrl)) {
+      return await capturePerformanceInsightsDrilldown(tabId, actualStartUrl, folder, index, depth, options);
+    }
     await runInTab(tabId, pageAutoScroll, []);
     await sleep(1200);
 
     const extracted = await runInTab(tabId, pageExtractReportMetrics, [DETAIL_TEXTS]);
     const title = extracted?.title || titleFallback;
     const actualUrl = extracted?.url || tab?.url || url;
-    const slug = `${String(index).padStart(2, "0")}-${safeSlug(title)}`;
+    const slug = numberedReportSlug(index, reportTypeFromUrl(actualUrl), title || actualUrl);
     const mdPath = `${folder}/${slug}.md`;
-    const pngPath = `${folder}/${slug}.png`;
-    const screenshotDataUrl = await captureVisibleTabForTab(tabId);
+    const pngPath = `${folder}/${slug}-full-page.png`;
+    const jsonPath = `${folder}/${slug}.json`;
+    const screenshotDataUrl = await captureReportScreenshot(tabId);
     const md = buildPageMarkdown({ url: actualUrl, title, depth, extracted, screenshot: pngPath });
     await downloadTextFile(mdPath, md, "text/markdown;charset=utf-8");
+    await downloadTextFile(jsonPath, JSON.stringify({ url: actualUrl, requestedUrl: url, title, depth, extracted }, null, 2), "application/json;charset=utf-8");
     await downloadDataUrlFile(pngPath, screenshotDataUrl);
-    return { url: actualUrl, requestedUrl: url, title, status: "success", depth, files: [mdPath, pngPath], screenshot: pngPath, metrics: extracted?.metrics || [], detailUrls: extracted?.detailUrls || [] };
+    return {
+      url: actualUrl,
+      requestedUrl: url,
+      title,
+      status: "success",
+      depth,
+      files: [mdPath, jsonPath, pngPath],
+      screenshot: pngPath,
+      metrics: extracted?.metrics || [],
+      tables: extracted?.tables || [],
+      discoveredReports: extracted?.discoveredReports || [],
+      detailUrls: uniqueStrings([...(extracted?.detailUrls || []), ...((extracted?.discoveredReports || []).map((report) => report.url))])
+    };
   } catch (e) {
     const title = titleFallback;
-    const slug = `${String(index).padStart(2, "0")}-${safeSlug(title)}-failed`;
+    const slug = numberedReportSlug(index, reportTypeFromUrl(url), title, "failed");
     const mdPath = `${folder}/${slug}.md`;
-    const md = `# ${title}\n\nURL: ${url}\n\nStatus: failed\n\nError: ${e.message || String(e)}\n`;
+    const pngPath = `${folder}/${slug}-error.png`;
+    const files = [mdPath];
+    let screenshot = "";
+    try {
+      await downloadDataUrlFile(pngPath, await captureReportScreenshot(tabId));
+      files.push(pngPath);
+      screenshot = pngPath;
+    } catch {}
+    const currentTab = await chrome.tabs.get(tabId).catch(() => null);
+    const currentTabUrl = currentTab?.url ? `\nCurrent tab URL: ${currentTab.url}\n` : "";
+    const md = `# ${title}\n\nURL: ${url}${currentTabUrl}\nStatus: failed\n\nError: ${e.message || String(e)}\n`;
     await downloadTextFile(mdPath, md, "text/markdown;charset=utf-8");
-    return { url, title, status: "failed", depth, error: e.message || String(e), files: [mdPath], metrics: [], detailUrls: [] };
+    return { url, requestedUrl: url, title, status: "failed", depth, error: e.message || String(e), files, screenshot, metrics: [], detailUrls: [] };
   }
 }
 
 async function captureCoreWebVitalsDrilldown(tabId, startUrl, folder, index, depth, options = {}) {
   const title = "Core Web Vitals Drilldown";
-  const slugBase = `${String(index).padStart(2, "0")}-${safeSlug(title)}`;
+  const slugBase = numberedReportSlug(index, "core-web-vitals", "drilldown");
   const files = [];
   const result = {
     title,
@@ -566,7 +762,7 @@ async function captureCoreWebVitalsDrilldown(tabId, startUrl, folder, index, dep
 
     await runInTab(tabId, pageScrollToCwvIssueTable, []);
     const issueScreenshotPath = `${folder}/${slugBase}-${safeSlug(deviceName)}-issues.png`;
-    await downloadDataUrlFile(issueScreenshotPath, await captureVisibleTabForTab(tabId));
+    await downloadDataUrlFile(issueScreenshotPath, await captureReportScreenshot(tabId));
     files.push(issueScreenshotPath);
     device.issueScreenshot = issueScreenshotPath;
 
@@ -601,9 +797,21 @@ async function captureCoreWebVitalsDrilldown(tabId, startUrl, folder, index, dep
       issue.urlGroupHeaders = groups?.headers || [];
       issue.detailTitle = groups?.title || "URL groups";
       issue.metricColumn = groups?.metricColumn || "";
+      issue.pagination = groups?.pagination || "";
+
+      for (let pageNo = 2; pageNo <= 10; pageNo++) {
+        const next = await runInTab(tabId, pageClickCwvUrlGroupsNextPage, []);
+        if (!next?.ok) break;
+        await sleep(1200);
+        const nextGroups = await runInTab(tabId, pageExtractCwvUrlGroups, [issue]);
+        const byUrl = new Map((issue.urlGroups || []).map((row) => [row.exampleUrl || JSON.stringify(row.values), row]));
+        for (const row of nextGroups?.rows || []) byUrl.set(row.exampleUrl || JSON.stringify(row.values), row);
+        issue.urlGroups = Array.from(byUrl.values());
+        issue.pagination = nextGroups?.pagination || issue.pagination;
+      }
 
       const detailScreenshotPath = `${folder}/${slugBase}-${safeSlug(deviceName)}-${String(i + 1).padStart(2, "0")}-${safeSlug(issue.issue)}.png`;
-      await downloadDataUrlFile(detailScreenshotPath, await captureVisibleTabForTab(tabId));
+      await downloadDataUrlFile(detailScreenshotPath, await captureReportScreenshot(tabId));
       files.push(detailScreenshotPath);
       issue.detailScreenshot = detailScreenshotPath;
       remainingIssueDrilldowns -= 1;
@@ -633,6 +841,300 @@ async function captureCoreWebVitalsDrilldown(tabId, startUrl, folder, index, dep
     detailUrls: [],
     cwv: result
   };
+}
+
+async function capturePageIndexingDrilldown(tabId, startUrl, folder, index, depth, options = {}) {
+  const title = "Page Indexing Drilldown";
+  const slugBase = numberedReportSlug(index, "page-indexing", "drilldown");
+  const files = [];
+  const result = {
+    title,
+    url: startUrl,
+    depth,
+    reasons: [],
+    errors: [],
+    startedAt: new Date().toISOString()
+  };
+  let remainingReasonDrilldowns = clampInt(options.maxPages, 1, 60, 30);
+
+  await waitForPageCondition(tabId, pageHasIndexingContent, [], 20000);
+  const startState = await runInTab(tabId, pageGetIndexingStartState, []);
+
+  if (startState?.isDrilldown) {
+    await waitForPageCondition(tabId, pageHasIndexingExamplesTable, [], 25000);
+    await runInTab(tabId, pageScrollToIndexingExamplesTable, []);
+    const examples = await runInTab(tabId, pageExtractIndexingExamples, [{}]);
+    const reason = {
+      rowIndex: 0,
+      reason: examples?.reason || "Current drilldown",
+      detailUrl: examples?.url || startUrl,
+      examples: examples?.rows || [],
+      exampleHeaders: examples?.headers || [],
+      pagination: examples?.pagination || ""
+    };
+    const screenshotPath = `${folder}/${slugBase}-current-examples.png`;
+    await downloadDataUrlFile(screenshotPath, await captureReportScreenshot(tabId));
+    files.push(screenshotPath);
+    reason.detailScreenshot = screenshotPath;
+    await collectIndexingExamplesPages(tabId, reason);
+    result.reasons.push(reason);
+  } else {
+    const ready = await waitForPageCondition(tabId, pageHasIndexingReasonTable, [], 25000);
+    if (!ready?.ok) result.errors.push(ready?.error || "Page Indexing reason table did not load");
+
+    const reportTab = await chrome.tabs.get(tabId);
+    result.reasonReportUrl = normalizeUrl(reportTab?.url || startUrl);
+    if (ready?.ok) {
+      await runInTab(tabId, pageScrollToIndexingReasonTable, []);
+      const reasonScreenshotPath = `${folder}/${slugBase}-reasons.png`;
+      await downloadDataUrlFile(reasonScreenshotPath, await captureReportScreenshot(tabId));
+      files.push(reasonScreenshotPath);
+      result.reasonScreenshot = reasonScreenshotPath;
+    }
+    const reasonRows = await collectIndexingReasonRows(tabId);
+    result.reasons = reasonRows?.rows || [];
+    if (!result.reasons.length) result.errors.push(reasonRows?.error || "No Page Indexing reasons found");
+
+    for (let i = 0; i < result.reasons.length && remainingReasonDrilldowns > 0; i++) {
+      if (reportController.stopped) break;
+      const reason = result.reasons[i];
+      setReportStatus(`Indexing: 下钻 ${i + 1}/${result.reasons.length} ${reason.reason}`);
+      await navigateReportTab(tabId, result.reasonReportUrl || startUrl);
+      const reasonReady = await waitForPageCondition(tabId, pageHasIndexingReasonTable, [], 20000);
+      if (!reasonReady?.ok) {
+        reason.error = reasonReady?.error || "Reason table did not reload";
+        continue;
+      }
+      await navigateIndexingReasonTablePage(tabId, reason.pageNumber || 1);
+
+      const clicked = await runInTab(tabId, pageClickIndexingReasonRow, [reason.reason, reason.rowIndex]);
+      if (!clicked?.ok) {
+        reason.error = clicked?.error || "Reason row click failed";
+        continue;
+      }
+
+      const examplesReady = await waitForPageCondition(tabId, pageHasIndexingExamplesTable, [], 25000);
+      if (!examplesReady?.ok) {
+        reason.error = examplesReady?.error || "Examples table did not load";
+        continue;
+      }
+
+      await runInTab(tabId, pageScrollToIndexingExamplesTable, []);
+      await sleep(700);
+      const examples = await runInTab(tabId, pageExtractIndexingExamples, [reason]);
+      reason.detailUrl = examples?.url || normalizeUrl((await chrome.tabs.get(tabId))?.url || "");
+      reason.detailTitle = examples?.title || "Examples";
+      reason.examples = examples?.rows || [];
+      reason.exampleHeaders = examples?.headers || [];
+      reason.pagination = examples?.pagination || "";
+
+      const detailScreenshotPath = `${folder}/${slugBase}-${String(i + 1).padStart(2, "0")}-${safeSlug(reason.reason)}-examples.png`;
+      await downloadDataUrlFile(detailScreenshotPath, await captureReportScreenshot(tabId));
+      files.push(detailScreenshotPath);
+      reason.detailScreenshot = detailScreenshotPath;
+      await collectIndexingExamplesPages(tabId, reason);
+      remainingReasonDrilldowns -= 1;
+    }
+  }
+
+  result.finishedAt = new Date().toISOString();
+  const mdPath = `${folder}/${slugBase}.md`;
+  const jsonPath = `${folder}/${slugBase}.json`;
+  await downloadTextFile(mdPath, buildPageIndexingMarkdown(result), "text/markdown;charset=utf-8");
+  await downloadTextFile(jsonPath, JSON.stringify(result, null, 2), "application/json;charset=utf-8");
+  files.push(mdPath, jsonPath);
+
+  const metrics = (result.reasons || []).map((reason) => {
+    const exampleCount = reason.examples?.length ? `, examples ${reason.examples.length}` : "";
+    return `${reason.reason || ""} (${reason.pages || "0"} pages${exampleCount})`.replace(/\s+/g, " ").trim();
+  }).slice(0, 80);
+
+  return {
+    url: startUrl,
+    title,
+    status: "success",
+    depth,
+    files,
+    screenshot: files.find((file) => file.endsWith(".png")) || "",
+    metrics,
+    detailUrls: [],
+    indexing: result
+  };
+}
+
+async function collectIndexingExamplesPages(tabId, reason) {
+  for (let pageNo = 2; pageNo <= 10; pageNo++) {
+    const next = await runInTab(tabId, pageClickIndexingExamplesNextPage, []);
+    if (!next?.ok) break;
+    await sleep(1200);
+    const nextExamples = await runInTab(tabId, pageExtractIndexingExamples, [reason]);
+    const byUrl = new Map((reason.examples || []).map((row) => [row.url || JSON.stringify(row.values), row]));
+    for (const row of nextExamples?.rows || []) byUrl.set(row.url || JSON.stringify(row.values), row);
+    reason.examples = Array.from(byUrl.values());
+    reason.pagination = nextExamples?.pagination || reason.pagination;
+  }
+}
+
+async function collectIndexingReasonRows(tabId) {
+  const rows = [];
+  const byReason = new Map();
+  let pageNumber = 1;
+  for (let pageNo = 1; pageNo <= 10; pageNo++) {
+    const extracted = await runInTab(tabId, pageExtractIndexingReasonRows, [pageNumber]);
+    for (const row of extracted?.rows || []) {
+      const key = `${row.reason}|${row.source}|${row.pages}`;
+      if (!byReason.has(key)) {
+        byReason.set(key, row);
+        rows.push(row);
+      }
+    }
+    const next = await runInTab(tabId, pageClickIndexingReasonNextPage, []);
+    if (!next?.ok) break;
+    pageNumber += 1;
+    await sleep(1000);
+  }
+  return { ok: rows.length > 0, rows, error: rows.length ? "" : "No Page Indexing reasons found" };
+}
+
+async function navigateIndexingReasonTablePage(tabId, pageNumber) {
+  for (let pageNo = 1; pageNo < pageNumber; pageNo++) {
+    const next = await runInTab(tabId, pageClickIndexingReasonNextPage, []);
+    if (!next?.ok) return next;
+    await sleep(900);
+  }
+  return { ok: true };
+}
+
+async function capturePerformanceInsightsDrilldown(tabId, startUrl, folder, index, depth) {
+  const title = "Performance Insights Drilldown";
+  const slugBase = numberedReportSlug(index, "performance-insights", "drilldown");
+  const files = [];
+  const config = buildPerformanceInsightsTargets(startUrl);
+  const result = {
+    title,
+    url: startUrl,
+    depth,
+    targets: [],
+    errors: [],
+    startedAt: new Date().toISOString()
+  };
+
+  for (const target of config.targets) {
+    if (reportController.stopped) break;
+    setReportStatus(`Insights: 抓取 ${target.label}`);
+    await navigateReportTab(tabId, target.contentUrl);
+    const ready = await waitForPageCondition(tabId, pageHasPerformanceInsightsContent, [], 25000);
+    const targetResult = {
+      label: target.label,
+      timeRange: target.timeRange,
+      contentTab: target.contentTab,
+      contentUrl: target.contentUrl,
+      searchAnalyticsUrl: target.searchAnalyticsUrl,
+      rows: [],
+      searchAnalyticsRows: [],
+      errors: []
+    };
+    result.targets.push(targetResult);
+    if (!ready?.ok) {
+      targetResult.errors.push(ready?.error || "Performance Insights content did not load");
+      continue;
+    }
+
+    await runInTab(tabId, pageScrollToPerformanceInsightsContent, []);
+    await sleep(700);
+    const extracted = await runInTab(tabId, pageExtractPerformanceInsightsContent, [target]);
+    targetResult.rows = extracted?.rows || [];
+    targetResult.pageTitle = extracted?.title || "";
+    targetResult.activeTab = extracted?.activeTab || "";
+    targetResult.pagination = extracted?.pagination || "";
+
+    const screenshotPath = `${folder}/${slugBase}-${safeSlug(target.label)}.png`;
+    await downloadDataUrlFile(screenshotPath, await captureReportScreenshot(tabId));
+    files.push(screenshotPath);
+    targetResult.screenshot = screenshotPath;
+
+    if (target.includeSearchAnalytics && target.searchAnalyticsUrl) {
+      setReportStatus(`Insights: 抓取 Search Analytics ${target.label}`);
+      await navigateReportTab(tabId, target.searchAnalyticsUrl);
+      const tableReady = await waitForPageCondition(tabId, pageHasPerformanceSearchAnalyticsTable, [], 30000);
+      if (!tableReady?.ok) {
+        targetResult.errors.push(tableReady?.error || "Search Analytics table did not load");
+      } else {
+        await runInTab(tabId, pageScrollToPerformanceSearchAnalyticsTable, []);
+        await sleep(900);
+        const analytics = await runInTab(tabId, pageExtractPerformanceSearchAnalyticsRows, []);
+        targetResult.searchAnalyticsRows = analytics?.rows || [];
+        targetResult.searchAnalyticsHeaders = analytics?.headers || [];
+        targetResult.searchAnalyticsPagination = analytics?.pagination || "";
+        const analyticsScreenshotPath = `${folder}/${slugBase}-${safeSlug(target.label)}-search-analytics.png`;
+        await downloadDataUrlFile(analyticsScreenshotPath, await captureReportScreenshot(tabId));
+        files.push(analyticsScreenshotPath);
+        targetResult.searchAnalyticsScreenshot = analyticsScreenshotPath;
+      }
+    }
+  }
+
+  result.finishedAt = new Date().toISOString();
+  const mdPath = `${folder}/${slugBase}.md`;
+  const jsonPath = `${folder}/${slugBase}.json`;
+  await downloadTextFile(mdPath, buildPerformanceInsightsMarkdown(result), "text/markdown;charset=utf-8");
+  await downloadTextFile(jsonPath, JSON.stringify(result, null, 2), "application/json;charset=utf-8");
+  files.push(mdPath, jsonPath);
+
+  const metrics = result.targets.flatMap((target) => (target.rows || []).map((row) => {
+    const change = [row.direction, row.changePercent, row.clickDelta || row.clicks].filter(Boolean).join(" ");
+    return `${target.label}: ${row.title || row.url} ${change}`.trim();
+  })).slice(0, 80);
+
+  return {
+    url: startUrl,
+    title,
+    status: "success",
+    depth,
+    files,
+    screenshot: files.find((file) => file.endsWith(".png")) || "",
+    metrics,
+    detailUrls: [],
+    performanceInsights: result
+  };
+}
+
+function buildPerformanceInsightsTargets(startUrl) {
+  const start = new URL(startUrl);
+  const accountPrefix = start.pathname.match(/^\/u\/\d+\//)?.[0] || "/";
+  const basePath = `${accountPrefix}search-console`;
+  const resourceId = start.searchParams.get("resource_id") || DEFAULT_PROPERTY;
+  const origin = `${start.origin}${basePath}`;
+  const makeContentUrl = (timeRange, contentTab) => {
+    const url = new URL(`${origin}/performance/insights/content`);
+    url.searchParams.set("resource_id", resourceId);
+    url.searchParams.set("time_range", timeRange);
+    url.searchParams.set("content_tab", contentTab);
+    return url.toString();
+  };
+  const makeSearchAnalyticsUrl = (timeRange, contentTab) => {
+    const contentUrl = makeContentUrl(timeRange, contentTab);
+    const url = new URL(`${origin}/performance/search-analytics`);
+    url.searchParams.set("resource_id", resourceId);
+    url.searchParams.set("breakdown", "page");
+    url.searchParams.set("insights_back_url", contentUrl);
+    url.searchParams.set("source_view", "insights");
+    url.searchParams.set("num_of_days", timeRange === "LAST7DAYS" ? "7" : "28");
+    url.searchParams.set("compare_date", "PREV");
+    url.hash = "dimension-tables";
+    return url.toString();
+  };
+  const targets = [
+    { label: "Last 28 days - Top", timeRange: "LAST28DAYS", contentTab: "TOP" },
+    { label: "Last 28 days - Trending up", timeRange: "LAST28DAYS", contentTab: "TRENDING_UP" },
+    { label: "Last 28 days - Trending down", timeRange: "LAST28DAYS", contentTab: "TRENDING_DOWN" },
+    { label: "Last 7 days - Trending down", timeRange: "LAST7DAYS", contentTab: "TRENDING_DOWN", includeSearchAnalytics: true }
+  ].map((target) => ({
+    ...target,
+    contentUrl: makeContentUrl(target.timeRange, target.contentTab),
+    searchAnalyticsUrl: makeSearchAnalyticsUrl(target.timeRange, target.contentTab)
+  }));
+  return { resourceId, targets };
 }
 
 async function waitForPageCondition(tabId, func, args = [], timeoutMs = 20000, intervalMs = 700) {
@@ -698,6 +1200,87 @@ async function captureVisibleTabForTab(tabId) {
   return chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
 }
 
+async function captureReportScreenshot(tabId) {
+  try {
+    return await captureFullPageScreenshotWithDebugger(tabId);
+  } catch (e) {
+    console.warn("Falling back to visible tab screenshot", e);
+    return captureVisibleTabForTab(tabId);
+  }
+}
+
+async function captureFullPageScreenshotWithDebugger(tabId) {
+  const target = { tabId };
+  const metrics = await runInTab(tabId, pageGetScreenshotCaptureMetrics, []);
+  const width = clampInt(metrics?.width, 1280, 2400, 1600);
+  const viewportHeight = clampInt(metrics?.viewportHeight, 800, 1400, 1000);
+  const maxHeight = 16000;
+  let attached = false;
+  try {
+    await debuggerAttach(target);
+    attached = true;
+    await debuggerSend(target, "Page.enable");
+    await debuggerSend(target, "Emulation.setDeviceMetricsOverride", {
+      width,
+      height: viewportHeight,
+      deviceScaleFactor: 1,
+      mobile: false,
+      screenWidth: width,
+      screenHeight: viewportHeight
+    });
+    await sleep(650);
+
+    const layout = await debuggerSend(target, "Page.getLayoutMetrics");
+    const content = layout?.cssContentSize || layout?.contentSize || {};
+    const clipWidth = Math.ceil(Math.min(Math.max(width, content.width || width), 2400));
+    const clipHeight = Math.ceil(Math.min(Math.max(viewportHeight, content.height || metrics?.height || viewportHeight), maxHeight));
+    const screenshot = await debuggerSend(target, "Page.captureScreenshot", {
+      format: "png",
+      fromSurface: true,
+      captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width: clipWidth, height: clipHeight, scale: 1 }
+    });
+    if (!screenshot?.data) throw new Error("Debugger screenshot returned empty data");
+    return `data:image/png;base64,${screenshot.data}`;
+  } finally {
+    if (attached) {
+      await debuggerSend(target, "Emulation.clearDeviceMetricsOverride").catch(() => {});
+      await debuggerDetach(target).catch(() => {});
+      await sleep(250);
+    }
+  }
+}
+
+function debuggerAttach(target) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach(target, "1.3", () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve();
+    });
+  });
+}
+
+function debuggerDetach(target) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.detach(target, () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve();
+    });
+  });
+}
+
+function debuggerSend(target, method, params = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand(target, method, params, (result) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(result);
+    });
+  });
+}
+
 function pageTypeUrlForInspection(url) {
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
   const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
@@ -735,6 +1318,31 @@ function pageTextSnapshot() {
   return { text: (document.body?.innerText || "").slice(0, 5000) };
 }
 
+function pageGetScreenshotCaptureMetrics() {
+  const doc = document.documentElement;
+  const body = document.body;
+  const scrollWidth = Math.max(
+    doc?.scrollWidth || 0,
+    body?.scrollWidth || 0,
+    doc?.clientWidth || 0,
+    window.innerWidth || 0
+  );
+  const scrollHeight = Math.max(
+    doc?.scrollHeight || 0,
+    body?.scrollHeight || 0,
+    doc?.clientHeight || 0,
+    window.innerHeight || 0
+  );
+  return {
+    width: Math.ceil(Math.max(1440, scrollWidth)),
+    height: Math.ceil(scrollHeight),
+    viewportHeight: Math.ceil(Math.max(900, window.innerHeight || 0)),
+    devicePixelRatio: window.devicePixelRatio || 1,
+    url: location.href,
+    title: document.title || ""
+  };
+}
+
 async function pageAutoScroll() {
   await new Promise((resolve) => {
     let total = 0;
@@ -753,29 +1361,131 @@ async function pageAutoScroll() {
 
 function pageExtractReportMetrics(detailTexts) {
   const text = document.body?.innerText || "";
-  const title = document.title || document.querySelector("h1")?.innerText || location.pathname;
+  const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const pageHeading = clean(document.querySelector('[role="heading"][aria-level="1"], h1')?.innerText || document.querySelector('[role="heading"], h1')?.innerText || "");
+  const title = pageHeading || clean(document.title) || location.pathname;
   const headings = Array.from(document.querySelectorAll("h1,h2,h3"))
-    .map((x) => x.innerText.trim())
+    .map((x) => clean(x.innerText || x.textContent))
     .filter(Boolean)
     .slice(0, 30);
 
   const metricNodes = Array.from(document.querySelectorAll('[role="heading"], h1, h2, h3, h4, [aria-label], div, span'))
-    .map((el) => (el.innerText || el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim())
+    .map((el) => clean(el.innerText || el.getAttribute("aria-label") || ""))
     .filter((x) => x && x.length <= 160 && /\d|good|poor|needs improvement|indexed|not indexed|valid|invalid|错误|有效|已编入|未编入|较差|良好|需要改进/i.test(x));
   const metrics = Array.from(new Set(metricNodes)).slice(0, 80);
 
-  const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const compactUrlCell = (value) => {
+    const raw = clean(value);
+    if (!/https?:\/\//i.test(raw)) return raw;
+    const compact = raw.replace(/\s+/g, "");
+    const match = compact.match(/https?:\/\/.+/i);
+    return match ? match[0] : compact;
+  };
+  const extractTable = (table, index) => {
+    const headerCells = table.querySelectorAll("thead th, thead td").length
+      ? Array.from(table.querySelectorAll("thead th, thead td"))
+      : Array.from(table.querySelectorAll("tr:first-child th, tr:first-child td"));
+    const headers = headerCells
+      .map((th) => clean(th.getAttribute("data-name") || th.getAttribute("data-label") || th.innerText || th.textContent))
+      .filter(Boolean)
+      .slice(0, 12);
+    const rows = Array.from(table.querySelectorAll("tbody tr"))
+      .map((row) => Array.from(row.querySelectorAll("th, td"))
+        .map((cell) => compactUrlCell(cell.getAttribute("data-string-value") || cell.getAttribute("data-numeric-value") || cell.innerText || cell.textContent))
+        .filter((cell) => cell !== ""))
+      .filter((row) => row.length && row.some(Boolean))
+      .slice(0, 120);
+    const before = table.closest(".VfPpkd-WsjYwc, .card, section, c-wiz, div") || table.parentElement;
+    const caption = clean(before?.querySelector?.("h1,h2,h3,[role='heading']")?.innerText || before?.querySelector?.(".cPSNDf,.ZxwVRb")?.innerText || `Table ${index + 1}`);
+    return { caption, headers, rows };
+  };
+  const tables = Array.from(document.querySelectorAll("table"))
+    .map(extractTable)
+    .filter((table) => table.rows.length)
+    .slice(0, 8);
+
+  const norm = (s) => clean(s).toLowerCase();
   const wanted = (detailTexts || []).map(norm);
   const links = Array.from(document.querySelectorAll("a, button, [role='button']"));
   const detailUrls = [];
   for (const el of links) {
     const label = norm(el.innerText || el.textContent || el.getAttribute("aria-label"));
     if (!wanted.some((w) => label.includes(w))) continue;
-    const href = el.href || el.closest("a")?.href || "";
+    const href = el.href || el.closest("a")?.href || el.querySelector?.("a[href]")?.href || "";
     if (href && href.startsWith("https://search.google.com/")) detailUrls.push(href);
   }
 
-  return { title, url: location.href, headings, metrics, textSnapshot: text.slice(0, 5000), detailUrls: Array.from(new Set(detailUrls)).slice(0, 12) };
+  const classify = (url, label) => {
+    try {
+      const u = new URL(url, location.href);
+      u.hash = "";
+      for (const key of Array.from(u.searchParams.keys())) {
+        if (/^utm_/i.test(key) || ["hl", "pli", "original_url", "original_resource_id"].includes(key)) u.searchParams.delete(key);
+      }
+      const params = Array.from(u.searchParams.entries()).sort(([a], [b]) => a.localeCompare(b));
+      u.search = "";
+      for (const [key, value] of params) u.searchParams.append(key, value);
+      const path = u.pathname;
+      const joined = `${path} ${label || ""}`.toLowerCase();
+      const blocked = /settings|achievements|url-inspection|feedback|about search console|privacy|term|accounts\.google\.com|support\.google\.com/i;
+      if (blocked.test(u.href) || blocked.test(joined)) return null;
+      const rules = [
+        { type: "overview", priority: 1, re: /\/search-console\/?$/ },
+        { type: "performance-insights", priority: 2, re: /\/performance\/insights/ },
+        { type: "performance-search-analytics", priority: 3, re: /\/performance\/search-analytics|search results/ },
+        { type: "performance-discover", priority: 4, re: /\/performance\/discover|\bdiscover\b/ },
+        { type: "page-indexing", priority: 5, re: /\/search-console\/index|pages|indexing/ },
+        { type: "video-indexing", priority: 6, re: /\/video-index|videos/ },
+        { type: "sitemaps", priority: 7, re: /\/sitemaps|sitemaps/ },
+        { type: "core-web-vitals", priority: 8, re: /\/core-web-vitals|core web vitals/ },
+        { type: "https", priority: 9, re: /\/https|https/ },
+        { type: "product-snippets", priority: 10, re: /\/r\/product|product snippets/ },
+        { type: "merchant-listings", priority: 11, re: /\/r\/merchant-listings|merchant listings/ },
+        { type: "breadcrumbs", priority: 12, re: /\/r\/breadcrumbs|breadcrumbs/ },
+        { type: "faq", priority: 13, re: /\/r\/faq|\bfaq\b/ },
+        { type: "review-snippets", priority: 14, re: /\/r\/review-snippet|review snippets/ },
+        { type: "amp", priority: 15, re: /\/amp\b|\bamp\b/ },
+        { type: "links", priority: 16, re: /\/links|\blinks\b/ },
+        { type: "removals", priority: 17, re: /\/removals|removals/ },
+        { type: "manual-actions", priority: 18, re: /\/manual-actions|manual actions/ },
+        { type: "security-issues", priority: 19, re: /\/security-issues|security issues/ },
+        { type: "detail", priority: 25, re: /drilldown|review issues|open report|full report|view details/ }
+      ];
+      const match = rules.find((rule) => rule.re.test(joined));
+      return match ? { ...match, url: u.href, label: clean(label) || match.type } : null;
+    } catch {
+      return null;
+    }
+  };
+  const discoveredByUrl = new Map();
+  for (const anchor of Array.from(document.querySelectorAll("a[href]"))) {
+    const label = clean(anchor.innerText || anchor.textContent || anchor.getAttribute("aria-label") || anchor.getAttribute("title") || "");
+    const href = anchor.getAttribute("href") || "";
+    let absolute = "";
+    try {
+      absolute = new URL(href, location.href).href;
+    } catch {
+      continue;
+    }
+    if (!absolute.startsWith("https://search.google.com/") || !absolute.includes("/search-console")) continue;
+    const report = classify(absolute, label);
+    if (!report) continue;
+    if (!discoveredByUrl.has(report.url)) discoveredByUrl.set(report.url, report);
+  }
+  const discoveredReports = Array.from(discoveredByUrl.values())
+    .sort((a, b) => (a.priority - b.priority) || a.url.localeCompare(b.url))
+    .slice(0, 60);
+
+  return {
+    title,
+    url: location.href,
+    headings,
+    metrics,
+    tables,
+    discoveredReports,
+    textSnapshot: text.slice(0, 5000),
+    detailUrls: Array.from(new Set([...detailUrls, ...discoveredReports.map((report) => report.url)])).slice(0, 40)
+  };
 }
 
 function pageHasCwvContent() {
@@ -941,6 +1651,9 @@ function pageExtractCwvUrlGroups(issue) {
   const title = Array.from(document.querySelectorAll("h1,h2,h3"))
     .map((heading) => clean(heading.innerText || heading.textContent || ""))
     .find((heading) => /url groups|网址组/i.test(heading)) || "URL groups";
+  const pagination = Array.from(document.querySelectorAll("div, span"))
+    .map((el) => clean(el.innerText || el.textContent || ""))
+    .find((value) => /^\d+\s*-\s*\d+\s+of\s+\d+$/i.test(value) || /^\d+\s*-\s*\d+\s*\/\s*\d+$/i.test(value)) || "";
   return {
     ok: rows.length > 0,
     url: location.href,
@@ -948,8 +1661,324 @@ function pageExtractCwvUrlGroups(issue) {
     issue,
     headers,
     metricColumn: metricIndex >= 0 ? headers[metricIndex] : "",
+    pagination,
     rows
   };
+}
+
+function pageClickCwvUrlGroupsNextPage() {
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const isDisabled = (el) => el.disabled || el.getAttribute("aria-disabled") === "true" || el.classList.contains("disabled");
+  const buttons = Array.from(document.querySelectorAll('button, [role="button"], a'))
+    .filter((el) => visible(el) && !isDisabled(el));
+  const next = buttons.find((el) => {
+    const label = norm(el.getAttribute("aria-label") || el.getAttribute("title") || el.innerText || el.textContent || "");
+    return /next page|go to next|下一页|后页|下一個/.test(label);
+  });
+  if (!next) return { ok: false, error: "Next page button not found" };
+  next.scrollIntoView({ block: "center", inline: "center" });
+  next.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+  next.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+  next.click();
+  return { ok: true };
+}
+
+function pageHasIndexingContent() {
+  const text = document.body?.innerText || "";
+  const ok = /page indexing|pages aren't indexed|why pages aren.t indexed|examples|last crawled|页面|索引/i.test(text);
+  return { ok, url: location.href, error: ok ? "" : "Page Indexing content not found" };
+}
+
+function pageGetIndexingStartState() {
+  const text = document.body?.innerText || "";
+  const isDrilldown = location.pathname.includes("/search-console/index/drilldown") || (/examples/i.test(text) && /last crawled/i.test(text));
+  return { ok: true, isDrilldown, url: location.href };
+}
+
+function pageHasIndexingReasonTable() {
+  const rows = Array.from(document.querySelectorAll("tbody tr"));
+  const reasonRows = rows.filter((row) => {
+    const text = row.innerText || "";
+    return /failed|not started|passed|n\/a|website|google systems/i.test(text) && row.querySelectorAll("td").length >= 5;
+  });
+  const text = document.body?.innerText || "";
+  const ok = reasonRows.length > 0 && /reason|source|validation|pages|why pages/i.test(text);
+  return { ok, rows: reasonRows.length, url: location.href, error: ok ? "" : "Page Indexing reason table not found" };
+}
+
+function pageExtractIndexingReasonRows(pageNumber = 1) {
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const cellText = (cell) => {
+    if (!cell) return "";
+    return clean(cell.getAttribute("data-string-value") || cell.getAttribute("data-numeric-value") || cell.innerText || cell.textContent || "");
+  };
+  const rows = Array.from(document.querySelectorAll("tbody tr"))
+    .filter((row) => visible(row) && row.querySelectorAll("td").length >= 5)
+    .map((row, index) => {
+      const cells = Array.from(row.querySelectorAll("td"));
+      const reason = cellText(cells[0]);
+      const source = cellText(cells[1]);
+      const validation = cellText(cells[2]);
+      const pages = cellText(cells[4]);
+      if (!reason || !source || !pages) return null;
+      return {
+        rowIndex: Number(row.getAttribute("data-rowid") || index),
+        pageNumber,
+        reason,
+        source,
+        validation,
+        pages
+      };
+    })
+    .filter(Boolean);
+  return { ok: rows.length > 0, rows, url: location.href, error: rows.length ? "" : "No indexing reason rows found" };
+}
+
+function pageClickIndexingReasonRow(reasonText, rowIndex) {
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const wanted = clean(reasonText).toLowerCase();
+  const rows = Array.from(document.querySelectorAll("tbody tr")).filter(visible);
+  let row = rows.find((candidate) => {
+    const firstCell = candidate.querySelector("td");
+    const text = clean(firstCell?.getAttribute("data-string-value") || firstCell?.innerText || "");
+    return text && text.toLowerCase() === wanted;
+  });
+  if (!row) {
+    row = rows.find((candidate, index) => Number(candidate.getAttribute("data-rowid") || index) === Number(rowIndex));
+  }
+  if (!row) return { ok: false, error: `Reason row not found: ${reasonText}` };
+  row.scrollIntoView({ block: "center", inline: "center" });
+  row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+  row.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+  row.click();
+  return { ok: true, reason: reasonText };
+}
+
+function pageHasIndexingExamplesTable() {
+  const text = document.body?.innerText || "";
+  const hasHeading = /examples|示例/i.test(text);
+  const hasUrlRows = Array.from(document.querySelectorAll("tbody tr")).some((row) => /https?:\/\//i.test(row.innerText || ""));
+  const ok = hasHeading && hasUrlRows;
+  return { ok, url: location.href, error: ok ? "" : "Page Indexing examples table not found" };
+}
+
+function pageScrollToIndexingReasonTable() {
+  const table = Array.from(document.querySelectorAll("table")).find((candidate) => /reason|source|validation|pages/i.test(candidate.innerText || ""));
+  if (table) table.scrollIntoView({ block: "start", inline: "nearest" });
+  return { ok: !!table };
+}
+
+function pageScrollToIndexingExamplesTable() {
+  const table = Array.from(document.querySelectorAll("table")).find((candidate) => /url|last crawled|https?:\/\//i.test(candidate.innerText || ""));
+  if (table) table.scrollIntoView({ block: "start", inline: "nearest" });
+  return { ok: !!table };
+}
+
+function pageExtractIndexingExamples(reason) {
+  const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const cleanCell = (cell) => {
+    const raw = clean(cell.getAttribute("data-string-value") || cell.getAttribute("data-numeric-value") || cell.innerText || cell.textContent || "");
+    if (!/https?:\/\//i.test(raw)) return raw;
+    const compact = raw.replace(/\s+/g, "");
+    const match = compact.match(/https?:\/\/.+/i);
+    return match ? match[0] : compact;
+  };
+  const extractTable = (table) => {
+    const headers = Array.from(table.querySelectorAll("thead th, tr th")).map((th) => clean(th.innerText || th.textContent || th.getAttribute("data-name") || th.getAttribute("data-label")));
+    const bodyRows = Array.from(table.querySelectorAll("tbody tr")).filter((row) => row.querySelectorAll("td").length);
+    const values = bodyRows.map((row) => Array.from(row.querySelectorAll("td")).map(cleanCell)).filter((row) => row.some(Boolean));
+    return { table, headers, values, text: clean(table.innerText || "") };
+  };
+  const tables = Array.from(document.querySelectorAll("table")).map(extractTable);
+  const selected = tables.find((table) => /last crawled/i.test(table.headers.join(" ")) && /https?:\/\//i.test(table.text))
+    || tables.find((table) => /examples/i.test(table.text) && /https?:\/\//i.test(table.text))
+    || tables.find((table) => /https?:\/\//i.test(table.text));
+  if (!selected) return { ok: false, error: "Examples table not found", url: location.href, rows: [] };
+
+  const headers = selected.headers.length ? selected.headers : ["URL", "Last crawled"];
+  const headerNorms = headers.map((header) => header.toLowerCase());
+  const urlIndex = Math.max(0, headerNorms.findIndex((header) => header === "url" || header.includes("url")));
+  const crawledIndex = headerNorms.findIndex((header) => header.includes("last crawled") || header.includes("最后"));
+  const rows = selected.values.map((values) => ({
+    url: values[urlIndex] || values.find((value) => /^https?:\/\//i.test(value)) || "",
+    lastCrawled: crawledIndex >= 0 ? values[crawledIndex] || "" : "",
+    values
+  })).filter((row) => row.url || row.values.some(Boolean));
+
+  const title = Array.from(document.querySelectorAll("h1,h2,h3"))
+    .map((heading) => clean(heading.innerText || heading.textContent || ""))
+    .find((heading) => /examples|示例/i.test(heading)) || "Examples";
+  const reasonTitle = Array.from(document.querySelectorAll("h1,h2,h3"))
+    .map((heading) => clean(heading.innerText || heading.textContent || ""))
+    .find((heading) => heading && !/examples|示例/i.test(heading)) || reason?.reason || "";
+  const pagination = Array.from(document.querySelectorAll("div, span"))
+    .map((el) => clean(el.innerText || el.textContent || ""))
+    .find((value) => /^\d+\s*-\s*\d+\s+of\s+\d+$/i.test(value) || /^\d+\s*-\s*\d+\s*\/\s*\d+$/i.test(value)) || "";
+  return {
+    ok: rows.length > 0,
+    url: location.href,
+    title,
+    reason: reasonTitle,
+    headers,
+    pagination,
+    rows
+  };
+}
+
+function pageClickIndexingReasonNextPage() {
+  return pageClickGscTableNextPage("Reason table next page button not found");
+}
+
+function pageClickIndexingExamplesNextPage() {
+  return pageClickGscTableNextPage("Examples next page button not found");
+}
+
+function pageClickGscTableNextPage(error) {
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const isDisabled = (el) => el.disabled || el.getAttribute("aria-disabled") === "true" || el.classList.contains("disabled");
+  const buttons = Array.from(document.querySelectorAll('button, [role="button"], a'))
+    .filter((el) => visible(el) && !isDisabled(el));
+  const next = buttons.find((el) => {
+    const label = norm(el.getAttribute("aria-label") || el.getAttribute("title") || el.innerText || el.textContent || "");
+    return /next page|go to next|下一页|后页|下一個/.test(label);
+  });
+  if (!next) return { ok: false, error };
+  next.scrollIntoView({ block: "center", inline: "center" });
+  next.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+  next.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+  next.click();
+  return { ok: true };
+}
+
+function pageHasPerformanceInsightsContent() {
+  const text = document.body?.innerText || "";
+  const ok = /your content|insights|top|trending up|trending down/i.test(text) && /https?:\/\//i.test(text);
+  return { ok, url: location.href, error: ok ? "" : "Performance Insights content not found" };
+}
+
+function pageScrollToPerformanceInsightsContent() {
+  const candidates = Array.from(document.querySelectorAll("h1,h2,h3,div,section"));
+  const section = candidates.find((el) => /your content/i.test(el.innerText || el.textContent || ""))
+    || candidates.find((el) => /https?:\/\//i.test(el.innerText || el.textContent || ""));
+  if (section) section.scrollIntoView({ block: "start", inline: "nearest" });
+  return { ok: !!section };
+}
+
+function pageExtractPerformanceInsightsContent(target) {
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const cleanUrl = (value) => (value || "").replace(/[),.;]+$/g, "");
+  const parseRow = (text, order) => {
+    const urlMatch = text.match(/https?:\/\/[^\s<>"')\]]+/i);
+    if (!urlMatch) return null;
+    const url = cleanUrl(urlMatch[0]);
+    const lines = (text.split(/\n+/).map(clean).filter(Boolean).length
+      ? text.split(/\n+/).map(clean).filter(Boolean)
+      : text.split(/\s{2,}/).map(clean).filter(Boolean));
+    const urlLineIndex = lines.findIndex((line) => line.includes(urlMatch[0]) || line.includes(url));
+    let title = "";
+    if (urlLineIndex > 0) title = lines[urlLineIndex - 1];
+    if (!title) {
+      const beforeUrl = clean(text.slice(0, urlMatch.index));
+      title = beforeUrl.split(/\n+/).map(clean).filter(Boolean).pop() || "";
+    }
+    if (!title) title = lines.find((line) => !line.includes("http") && !/^[↓↑+-]?\s*\d/.test(line)) || "";
+    const percentMatch = text.match(/(\d+(?:\.\d+)?)\s*%/);
+    const deltaMatch = text.match(/(?:^|\s)([-+]\s*\d[\d,]*)\s*$/) || text.match(/%\s*([-+]\s*\d[\d,]*)/);
+    const numberMatches = Array.from(text.matchAll(/[-+]?\d[\d,]*/g)).map((match) => match[0]);
+    const direction = /↓|down/i.test(text) || target?.contentTab === "TRENDING_DOWN"
+      ? "down"
+      : (/↑|up/i.test(text) || target?.contentTab === "TRENDING_UP" ? "up" : "");
+    return {
+      order,
+      title: title || url,
+      url,
+      direction,
+      changePercent: percentMatch ? `${percentMatch[1]}%` : "",
+      clickDelta: deltaMatch ? deltaMatch[1].replace(/\s+/g, "") : "",
+      clicks: !deltaMatch && numberMatches.length ? numberMatches[numberMatches.length - 1] : "",
+      text
+    };
+  };
+
+  const elements = Array.from(document.querySelectorAll("a, div, li, tr, [role='row']"))
+    .filter((el) => visible(el))
+    .map((el, order) => ({ el, order, text: (el.innerText || el.textContent || "").trim() }))
+    .filter((item) => /https?:\/\//i.test(item.text) && item.text.length < 1400);
+  const byUrl = new Map();
+  for (const item of elements) {
+    const parsed = parseRow(item.text, item.order);
+    if (!parsed) continue;
+    const existing = byUrl.get(parsed.url);
+    const score = (parsed.title && parsed.title !== parsed.url ? 1000 : 0)
+      + (parsed.changePercent || parsed.clickDelta || parsed.clicks ? 200 : 0)
+      + (item.text.length > 40 ? 50 : 0)
+      - Math.abs(item.text.length - 260) / 10;
+    if (!existing || score > existing.score) byUrl.set(parsed.url, { ...parsed, score });
+  }
+
+  const rows = Array.from(byUrl.values())
+    .sort((a, b) => a.order - b.order)
+    .map(({ score, ...row }) => row)
+    .slice(0, 100);
+  const activeTab = Array.from(document.querySelectorAll('[aria-selected="true"], [role="tab"], a, button'))
+    .map((el) => clean(el.innerText || el.textContent || el.getAttribute("aria-label") || ""))
+    .find((label) => /top|trending up|trending down/i.test(label)) || "";
+  return {
+    ok: rows.length > 0,
+    url: location.href,
+    title: document.title || "Performance Insights",
+    activeTab,
+    pagination: "",
+    rows,
+    error: rows.length ? "" : "No Performance Insights content rows found"
+  };
+}
+
+function pageHasPerformanceSearchAnalyticsTable() {
+  const text = document.body?.innerText || "";
+  const ok = /clicks|impressions|position|pages|page/i.test(text) && /https?:\/\//i.test(text);
+  return { ok, url: location.href, error: ok ? "" : "Performance Search Analytics table not found" };
+}
+
+function pageScrollToPerformanceSearchAnalyticsTable() {
+  const table = Array.from(document.querySelectorAll("table")).find((candidate) => /clicks|impressions|position|https?:\/\//i.test(candidate.innerText || ""));
+  if (table) table.scrollIntoView({ block: "start", inline: "nearest" });
+  return { ok: !!table };
+}
+
+function pageExtractPerformanceSearchAnalyticsRows() {
+  const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const cleanCell = (cell) => {
+    const raw = clean(cell.getAttribute("data-string-value") || cell.getAttribute("data-numeric-value") || cell.innerText || cell.textContent || "");
+    if (!/https?:\/\//i.test(raw)) return raw;
+    const compact = raw.replace(/\s+/g, "");
+    const match = compact.match(/https?:\/\/.+/i);
+    return match ? match[0] : compact;
+  };
+  const extractTable = (table) => {
+    const headers = Array.from(table.querySelectorAll("thead th, tr th")).map((th) => clean(th.innerText || th.textContent || th.getAttribute("data-name") || th.getAttribute("data-label")));
+    const bodyRows = Array.from(table.querySelectorAll("tbody tr")).filter((row) => row.querySelectorAll("td").length);
+    const values = bodyRows.map((row) => Array.from(row.querySelectorAll("td")).map(cleanCell)).filter((row) => row.some(Boolean));
+    return { headers, values, text: clean(table.innerText || "") };
+  };
+  const tables = Array.from(document.querySelectorAll("table")).map(extractTable);
+  const selected = tables.find((table) => /clicks|impressions|position/i.test(table.headers.join(" ")) && /https?:\/\//i.test(table.text))
+    || tables.find((table) => /https?:\/\//i.test(table.text));
+  if (!selected) return { ok: false, error: "Search Analytics table not found", url: location.href, rows: [] };
+  const headers = selected.headers.length ? selected.headers : ["Page", "Clicks"];
+  const rows = selected.values.map((values) => {
+    const url = values.find((value) => /^https?:\/\//i.test(value)) || "";
+    return { url, values };
+  }).filter((row) => row.url || row.values.some(Boolean)).slice(0, 200);
+  const pagination = Array.from(document.querySelectorAll("div, span"))
+    .map((el) => clean(el.innerText || el.textContent || ""))
+    .find((value) => /^\d+\s*-\s*\d+\s+of\s+\d+$/i.test(value) || /^\d+\s*-\s*\d+\s*\/\s*\d+$/i.test(value)) || "";
+  return { ok: rows.length > 0, url: location.href, headers, rows, pagination, error: rows.length ? "" : "No Search Analytics rows found" };
 }
 
 async function runInTab(tabId, func, args = []) {
@@ -970,7 +1999,48 @@ function buildPageMarkdown(page) {
   const extracted = page.extracted || {};
   const metrics = extracted.metrics || [];
   const headings = extracted.headings || [];
-  return `# ${page.title}\n\nURL: ${page.url}\n\nDepth: ${page.depth}\n\nScreenshot: ./${page.screenshot.split("/").pop()}\n\n## Key metrics\n\n${metrics.map((x) => `- ${x}`).join("\n") || "- No metrics extracted"}\n\n## Headings\n\n${headings.map((x) => `- ${x}`).join("\n") || "- No headings extracted"}\n\n## Text snapshot\n\n\`\`\`text\n${(extracted.textSnapshot || "").slice(0, 4000)}\n\`\`\`\n`;
+  const discovered = extracted.discoveredReports || [];
+  const tables = extracted.tables || [];
+  const lines = [
+    `# ${page.title}`,
+    "",
+    `URL: ${page.url}`,
+    "",
+    `Depth: ${page.depth}`,
+    "",
+    `Screenshot: ./${page.screenshot.split("/").pop()}`,
+    "",
+    "## Key metrics",
+    "",
+    metrics.map((x) => `- ${x}`).join("\n") || "- No metrics extracted",
+    "",
+    "## Headings",
+    "",
+    headings.map((x) => `- ${x}`).join("\n") || "- No headings extracted",
+    "",
+    "## Discovered GSC reports",
+    "",
+    discovered.length ? discovered.map((report) => `- ${report.label || report.type}: ${report.url}`).join("\n") : "- No GSC report links discovered",
+    ""
+  ];
+
+  if (tables.length) {
+    lines.push("## Tables", "");
+    for (const table of tables) {
+      const headers = table.headers?.length ? table.headers : (table.rows?.[0] || []).map((_, index) => `Column ${index + 1}`);
+      lines.push(`### ${table.caption || "Table"}`, "");
+      lines.push(`| ${headers.map(escapeTable).join(" | ")} |`);
+      lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
+      for (const row of table.rows || []) {
+        const normalized = headers.map((_, index) => row[index] || "");
+        lines.push(`| ${normalized.map(escapeTable).join(" | ")} |`);
+      }
+      lines.push("");
+    }
+  }
+
+  lines.push("## Text snapshot", "", "```text", (extracted.textSnapshot || "").slice(0, 4000), "```", "");
+  return lines.join("\n");
 }
 
 function buildCoreWebVitalsMarkdown(report) {
@@ -1005,6 +2075,7 @@ function buildCoreWebVitalsMarkdown(report) {
       lines.push(`URLs: ${issue.urls || "-"}`);
       if (issue.detailUrl) lines.push(`Detail URL: ${issue.detailUrl}`);
       if (issue.detailScreenshot) lines.push(`Screenshot: ./${issue.detailScreenshot.split("/").pop()}`);
+      if (issue.pagination) lines.push(`Pagination: ${issue.pagination}`);
       if (issue.error) lines.push(`Error: ${issue.error}`);
       lines.push("");
 
@@ -1024,23 +2095,233 @@ function buildCoreWebVitalsMarkdown(report) {
   return `${lines.join("\n").trim()}\n`;
 }
 
+function buildPageIndexingMarkdown(report) {
+  const lines = [
+    "# Page Indexing Drilldown",
+    "",
+    `Source: ${report.url}`,
+    `Generated at: ${new Date().toLocaleString()}`,
+    ""
+  ];
+
+  if (report.reasonReportUrl) lines.push(`Reason report: ${report.reasonReportUrl}`, "");
+  if (report.reasonScreenshot) lines.push(`Reason screenshot: ./${report.reasonScreenshot.split("/").pop()}`, "");
+  if (report.errors?.length) lines.push("Errors:", ...report.errors.map((error) => `- ${error}`), "");
+
+  lines.push("| Reason | Source | Validation | Pages | Examples |");
+  lines.push("|---|---|---|---:|---:|");
+  for (const reason of report.reasons || []) {
+    lines.push(`| ${escapeTable(reason.reason)} | ${escapeTable(reason.source)} | ${escapeTable(reason.validation)} | ${escapeTable(reason.pages)} | ${reason.examples?.length || 0} |`);
+  }
+  if (!report.reasons?.length) lines.push("| - | - | - | - | - |");
+  lines.push("");
+
+  for (const reason of report.reasons || []) {
+    lines.push(`## ${reason.reason || "Reason"}`, "");
+    lines.push(`Source: ${reason.source || "-"}`);
+    lines.push(`Validation: ${reason.validation || "-"}`);
+    lines.push(`Pages: ${reason.pages || "-"}`);
+    if (reason.detailUrl) lines.push(`Detail URL: ${reason.detailUrl}`);
+    if (reason.detailScreenshot) lines.push(`Screenshot: ./${reason.detailScreenshot.split("/").pop()}`);
+    if (reason.pagination) lines.push(`Pagination: ${reason.pagination}`);
+    if (reason.error) lines.push(`Error: ${reason.error}`);
+    lines.push("");
+
+    const headers = reason.exampleHeaders?.length ? reason.exampleHeaders : ["URL", "Last crawled"];
+    lines.push(`| ${headers.map(escapeTable).join(" | ")} |`);
+    lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
+    for (const row of reason.examples || []) {
+      const values = row.values?.length ? row.values : [row.url, row.lastCrawled];
+      const normalized = headers.map((_, index) => values[index] || "");
+      lines.push(`| ${normalized.map(escapeTable).join(" | ")} |`);
+    }
+    if (!reason.examples?.length) lines.push(`| ${headers.map(() => "-").join(" | ")} |`);
+    lines.push("");
+  }
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
+function buildPerformanceInsightsMarkdown(report) {
+  const lines = [
+    "# Performance Insights Drilldown",
+    "",
+    `Source: ${report.url}`,
+    `Generated at: ${new Date().toLocaleString()}`,
+    ""
+  ];
+
+  for (const target of report.targets || []) {
+    lines.push(`## ${target.label}`, "");
+    lines.push(`Content URL: ${target.contentUrl}`);
+    if (target.searchAnalyticsUrl) lines.push(`Search Analytics URL: ${target.searchAnalyticsUrl}`);
+    if (target.screenshot) lines.push(`Screenshot: ./${target.screenshot.split("/").pop()}`);
+    if (target.activeTab) lines.push(`Active tab: ${target.activeTab}`);
+    if (target.errors?.length) lines.push("Errors:", ...target.errors.map((error) => `- ${error}`));
+    lines.push("");
+
+    lines.push("| Title | URL | Direction | Change | Click Delta | Clicks |");
+    lines.push("|---|---|---|---:|---:|---:|");
+    for (const row of target.rows || []) {
+      lines.push(`| ${escapeTable(row.title)} | ${escapeTable(row.url)} | ${escapeTable(row.direction)} | ${escapeTable(row.changePercent)} | ${escapeTable(row.clickDelta)} | ${escapeTable(row.clicks)} |`);
+    }
+    if (!target.rows?.length) lines.push("| - | - | - | - | - | - |");
+    lines.push("");
+
+    if (target.searchAnalyticsRows?.length) {
+      lines.push("### Search Analytics Page Breakdown", "");
+      if (target.searchAnalyticsScreenshot) lines.push(`Screenshot: ./${target.searchAnalyticsScreenshot.split("/").pop()}`, "");
+      if (target.searchAnalyticsPagination) lines.push(`Pagination: ${target.searchAnalyticsPagination}`, "");
+      const headers = target.searchAnalyticsHeaders?.length ? target.searchAnalyticsHeaders : ["Page", "Clicks"];
+      lines.push(`| ${headers.map(escapeTable).join(" | ")} |`);
+      lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
+      for (const row of target.searchAnalyticsRows || []) {
+        const values = headers.map((_, index) => row.values?.[index] || "");
+        lines.push(`| ${values.map(escapeTable).join(" | ")} |`);
+      }
+      lines.push("");
+    }
+  }
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
+async function buildAiGscReportSummary(job) {
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "LR_BUILD_GSC_REPORT_INSIGHTS", job: slimGscReportJobForAi(job) });
+    if (res?.ok) return { ok: true, ai: res.ai };
+    return { ok: false, error: res?.error || "AI report summary failed" };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+function slimGscReportJobForAi(job) {
+  const slimRows = (rows, limit = 40) => (rows || []).slice(0, limit);
+  return {
+    type: job.type,
+    status: job.status,
+    folder: job.folder,
+    urls: job.urls,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    pages: (job.pages || []).map((page) => ({
+      title: page.title,
+      url: page.url,
+      requestedUrl: page.requestedUrl,
+      status: page.status,
+      metrics: (page.metrics || []).slice(0, 60),
+      tables: (page.tables || []).slice(0, 5).map((table) => ({
+        caption: table.caption,
+        headers: table.headers || [],
+        rows: slimRows(table.rows, 30)
+      })),
+      discoveredReports: (page.discoveredReports || []).slice(0, 30),
+      error: page.error || "",
+      screenshots: pageScreenshotFiles(page).map(reportFileName),
+      markdownFiles: reportFilesByExtension(page.files || [], ".md").map(reportFileName),
+      jsonFiles: reportFilesByExtension(page.files || [], ".json").map(reportFileName),
+      coreWebVitals: page.cwv ? {
+        devices: (page.cwv.devices || []).map((device) => ({
+          name: device.name,
+          issues: (device.issues || []).map((issue) => ({
+            severity: issue.severity,
+            issue: issue.issue,
+            validation: issue.validation,
+            urls: issue.urls,
+            urlGroups: slimRows(issue.urlGroups, 25)
+          })),
+          errors: device.errors || []
+        }))
+      } : null,
+      pageIndexing: page.indexing ? {
+        reasons: (page.indexing.reasons || []).map((reason) => ({
+          reason: reason.reason,
+          source: reason.source,
+          validation: reason.validation,
+          pages: reason.pages,
+          examples: slimRows(reason.examples, 30),
+          error: reason.error || ""
+        })),
+        errors: page.indexing.errors || []
+      } : null,
+      performanceInsights: page.performanceInsights ? {
+        targets: (page.performanceInsights.targets || []).map((target) => ({
+          label: target.label,
+          rows: slimRows(target.rows, 40),
+          searchAnalyticsRows: slimRows(target.searchAnalyticsRows, 40),
+          errors: target.errors || []
+        })),
+        errors: page.performanceInsights.errors || []
+      } : null
+    }))
+  };
+}
+
 function buildIndexMarkdown(job) {
-  const rows = (job.pages || []).map((p) => `| ${escapeTable(p.title)} | ${p.status} | ${escapeTable((p.metrics || []).slice(0, 3).join("; "))} | ${p.screenshot || ""} |`).join("\n");
+  const pages = job.pages || [];
+  const rows = pages.map((p) => `| ${escapeTable(p.title)} | ${escapeTable(p.status)} | ${escapeTable((p.metrics || []).slice(0, 3).join("; "))} | ${reportFileLinks(pageScreenshotFiles(p))} |`).join("\n");
+  const detailRows = pages.map((p) => {
+    const files = p.files || [];
+    return `| ${escapeTable(p.title)} | ${escapeTable(p.status)} | ${reportFileLinks(reportFilesByExtension(files, ".md"))} | ${reportFileLinks(reportFilesByExtension(files, ".json"))} | ${reportFileLinks(pageScreenshotFiles(p))} |`;
+  }).join("\n");
+  const allFiles = uniqueStrings(job.files || []).map((file) => `- ${markdownReportFileLink(file)}`).join("\n");
+  const seedRows = (job.seedReports || []).map((seed) => `- ${seed.label}: ${seed.url}`).join("\n");
+  const discoveredRows = uniqueStrings(pages.flatMap((p) => (p.discoveredReports || []).map((report) => `${report.label || report.type}: ${report.url}`)))
+    .slice(0, 80)
+    .map((row) => `- ${row}`)
+    .join("\n");
   const followups = [];
-  for (const p of job.pages || []) {
+  for (const p of pages) {
     const joined = (p.metrics || []).join(" ").toLowerCase();
     if (/not indexed|未编入|poor|较差|invalid|错误|needs improvement|需要改进/.test(joined)) followups.push(`Review ${p.title}: ${p.url}`);
   }
-  return `# GSC Report\n\nGenerated at: ${new Date().toLocaleString()}\n\nFolder: ${job.folder}\n\n## Summary\n\n| Report | Status | Key Findings | Screenshot |\n|---|---|---|---|\n${rows || "| - | - | - | - |"}\n\n## Follow-up Items\n\n${followups.map((x, i) => `${i + 1}. ${x}`).join("\n") || "No obvious follow-up items extracted."}\n\n## Source URLs\n\n${(job.urls || []).map((u) => `- ${u}`).join("\n")}\n`;
+  const aiSection = job.aiSummary?.markdown
+    ? `\n\n## AI Prioritized Summary\n\n${job.aiSummary.markdown.trim()}\n`
+    : "";
+  const crawlLimitSection = job.truncated
+    ? `\n\n## Crawl Limit\n\nMax pages was reached before the queue was exhausted. Increase Max pages to continue.\n\n${(job.remainingQueue || []).map((item) => `- depth ${item.depth}: ${item.url}`).join("\n") || "- Remaining queue not recorded"}\n`
+    : "";
+  return `# GSC Report\n\nGenerated at: ${new Date().toLocaleString()}\n\nStatus: ${job.status || "running"}\n\nDownload folder: ${job.downloadFolder || `Downloads/${job.folder}`}\n\n这个总目录会链接本次导出的全部截图、Markdown 明细报告和 JSON 数据文件。\n${aiSection}${crawlLimitSection}\n## Summary\n\n| Report | Status | Key Findings | Screenshots |\n|---|---|---|---|\n${rows || "| - | - | - | - |"}\n\n## Detail Report Files\n\n| Report | Status | Detail Markdown | JSON Data | Screenshots |\n|---|---|---|---|---|\n${detailRows || "| - | - | - | - | - |"}\n\n## Follow-up Items\n\n${followups.map((x, i) => `${i + 1}. ${x}`).join("\n") || "No obvious follow-up items extracted."}\n\n## Seeded SEO/Growth Reports\n\n${seedRows || "- No default seed reports used"}\n\n## Discovered GSC Reports\n\n${discoveredRows || "- No discovered report links"}\n\n## Source URLs\n\n${(job.urls || []).map((u) => `- ${u}`).join("\n") || "- Current active GSC tab"}\n\n## All Downloaded Files\n\n${allFiles || "- No files exported"}\n`;
+}
+
+function reportFileName(file) {
+  return (file || "").split("/").filter(Boolean).pop() || "";
+}
+
+function markdownReportFileLink(file) {
+  const name = reportFileName(file);
+  if (!name) return "-";
+  const href = `./${name.replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29")}`;
+  return `[${escapeMd(name)}](${href})`;
+}
+
+function reportFileLinks(files) {
+  const links = uniqueStrings(files || []).map(markdownReportFileLink).filter(Boolean);
+  return links.length ? links.join("<br>") : "-";
+}
+
+function reportFilesByExtension(files, extension) {
+  const suffix = (extension || "").toLowerCase();
+  return uniqueStrings(files || []).filter((file) => file.toLowerCase().endsWith(suffix));
+}
+
+function pageScreenshotFiles(page) {
+  return uniqueStrings([page?.screenshot, ...((page?.files || []).filter((file) => file.toLowerCase().endsWith(".png")))].filter(Boolean));
 }
 
 async function downloadTextFile(filename, content, mimeType = "text/plain;charset=utf-8") {
   const url = `data:${mimeType},${encodeURIComponent(content)}`;
-  return chrome.downloads.download({ url, filename, saveAs: false });
+  return chrome.downloads.download({ url, filename: normalizeDownloadFilename(filename), saveAs: false });
 }
 
 async function downloadDataUrlFile(filename, dataUrl) {
-  return chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
+  return chrome.downloads.download({ url: dataUrl, filename: normalizeDownloadFilename(filename), saveAs: false });
+}
+
+function normalizeDownloadFilename(filename) {
+  // Chrome downloads filename is relative to the browser's Downloads directory.
+  return (filename || "").replace(/^\/+/, "").replace(/^Downloads\//i, "");
 }
 
 async function saveSubmitJob(job) {
@@ -1076,7 +2357,8 @@ function formatSubmitStatus(job) {
 }
 
 function formatReportStatus(job) {
-  return `${job.status || "running"}: pages ${(job.pages || []).length}, files ${(job.files || []).length}, folder ${job.folder || ""}`;
+  const displayFolder = job.downloadFolder || (job.folder ? `Downloads/${job.folder}` : GSC_REPORT_DOWNLOAD_DISPLAY_ROOT);
+  return `${job.status || "running"}: pages ${(job.pages || []).length}, files ${(job.files || []).length}, folder ${displayFolder}`;
 }
 
 function setSubmitStatus(text) {
@@ -1097,6 +2379,10 @@ function parseCsv(text) {
   return (text || "").split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
 }
 
+function uniqueStrings(values) {
+  return Array.from(new Set((values || []).filter(Boolean)));
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1111,9 +2397,50 @@ function safeSlug(value) {
   return (value || "report").toString().trim().toLowerCase().replace(/https?:\/\//g, "").replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 72) || "report";
 }
 
+function numberedReportSlug(index, ...parts) {
+  const semantic = parts.map(safeSlug).filter(Boolean).join("-");
+  return `${String(index).padStart(2, "0")}-${semantic || "gsc-report"}`.slice(0, 150).replace(/-$/g, "");
+}
+
+function reportTypeFromUrl(url) {
+  try {
+    const u = new URL(url);
+    const path = u.pathname;
+    if (path.includes("/core-web-vitals")) return "core-web-vitals";
+    if (path.includes("/search-console/index/drilldown")) return "page-indexing-examples";
+    if (path.includes("/search-console/index")) return "page-indexing";
+    if (path.includes("/video-index")) return "video-indexing";
+    if (path.includes("/performance/insights/content")) return "performance-insights-content";
+    if (path.includes("/performance/search-analytics")) return "performance-search-analytics";
+    if (path.includes("/performance/discover")) return "performance-discover";
+    if (path.includes("/performance/insights")) return "performance-insights";
+    if (path.includes("/sitemaps")) return "sitemaps";
+    if (path.includes("/removals")) return "removals";
+    if (path.includes("/https")) return "https";
+    if (path.includes("/r/product")) return "product-snippets";
+    if (path.includes("/r/merchant-listings")) return "merchant-listings";
+    if (path.includes("/r/breadcrumbs")) return "breadcrumbs";
+    if (path.includes("/r/faq")) return "faq";
+    if (path.includes("/r/review-snippet")) return "review-snippets";
+    if (path.includes("/amp")) return "amp";
+    if (path.includes("/manual-actions")) return "manual-actions";
+    if (path.includes("/security-issues")) return "security-issues";
+    if (path.includes("/links")) return "links";
+    if (path.includes("/url-inspection")) return "url-inspection";
+    if (/\/search-console\/?$/.test(path)) return "overview";
+    return "gsc-report";
+  } catch {
+    return "gsc-report";
+  }
+}
+
 function formatLocalTimestamp(date) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+}
+
+function buildGscReportFolderName(date) {
+  return `${GSC_REPORT_DOWNLOAD_ROOT}/${formatLocalTimestamp(date)}`;
 }
 
 function decodeHtml(text) {

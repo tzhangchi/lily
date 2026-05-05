@@ -40,7 +40,30 @@ AZURE_OPENAI_API_VERSION="2024-12-01-preview"
 - **AI 服务地址**：`http://localhost:3100`
 - **默认模型**：`gpt-4.1` 或 `gpt-5.2`
 
-## 4) 接口
+Chrome 扩展不能直接启动本地 Node/Next.js 进程；它只会在 Chrome 启动或保存设置时探测 `/api/health`，并在 AI 可用时调用本服务。生产环境可以把本目录部署到 Vercel，然后把 Vercel URL 配到插件 Settings 的 **AI 服务地址**。
+
+## 4) GSC 报告 AI 摘要
+
+GSC Operator 抓取报告时会在 AI 已启用且服务可用的情况下调用：
+
+```json
+{
+  "mode": "gscReportSummary",
+  "model": "gpt-4.1",
+  "analysis": {
+    "url": "https://search.google.com/...",
+    "title": "Google Search Console report",
+    "domain": "llamagen.ai",
+    "gscReport": { "...": "插件抓取的 GSC 结构化数据" }
+  }
+}
+```
+
+返回的 `ai.markdown` 会写入 `gsc-report-index.md`。
+
+插件现在会把递归发现到的 Search results、Discover、Indexing、Videos、Sitemaps、Core Web Vitals、HTTPS、Links、富结果、Manual actions、Security issues 等报告，以及通用表格抽取结果一并传给 AI 摘要，方便按 SEO / Growth 优先级排序。
+
+## 5) 接口
 
 `POST /api/analyze`
 
