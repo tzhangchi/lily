@@ -707,14 +707,15 @@ async function runReportCaptureJob() {
     }
   }
 
+  const summaryPath = `${folder}/Summary.html`;
   const indexPath = `${folder}/gsc-report-index.md`;
   const manifestPath = `${folder}/gsc-report-manifest.json`;
   job.status = reportController.stopped ? "stopped" : "done";
   job.finishedAt = new Date().toISOString();
   job.truncated = queue.length > 0 && job.pages.length >= maxPages;
   job.remainingQueue = queue.slice(0, 20).map((item) => ({ url: item.url, depth: item.depth, source: item.source }));
-  job.files = uniqueStrings([...job.files, indexPath, manifestPath]);
-  setReportProgress(job.pages.length, Math.max(job.pages.length, 1), "生成索引与 manifest…");
+  job.files = uniqueStrings([...job.files, summaryPath, indexPath, manifestPath]);
+  setReportProgress(job.pages.length, Math.max(job.pages.length, 1), "生成 Summary.html、索引与 manifest…");
 
   if (aiReportSummary && !reportController.stopped) {
     setReportProgress(job.pages.length, Math.max(job.pages.length, 1), "生成 AI 摘要（如果已启用）…");
@@ -724,7 +725,9 @@ async function runReportCaptureJob() {
   }
 
   const indexMd = buildIndexMarkdown(job);
+  const summaryHtml = buildGscSummaryHtml(job, indexMd);
   const manifest = JSON.stringify(job, null, 2);
+  await downloadTextFile(summaryPath, summaryHtml, "text/html;charset=utf-8");
   await downloadTextFile(indexPath, indexMd, "text/markdown;charset=utf-8");
   await downloadTextFile(manifestPath, manifest, "application/json;charset=utf-8");
   await saveReportJob(job);
@@ -3225,6 +3228,510 @@ function buildIndexMarkdown(job) {
     .map((item) => `| ${escapeTable(item.area)} | ${escapeTable(item.coverage)} | ${escapeTable(item.why)} |`)
     .join("\n");
   return `# GSC Report\n\nGenerated at: ${new Date().toLocaleString()}\n\nStatus: ${job.status || "running"}\n\nDownload folder: ${job.downloadFolder || `Downloads/${job.folder}`}\n\n这个总目录会链接本次导出的全部截图、Markdown 明细报告和 JSON 数据文件。\n${aiSection}${crawlLimitSection}\n## Local SEO / Conversion / Quality Action Plan\n\n| Priority | Area | Report | Action | Evidence |\n|---|---|---|---|---|\n${localPlanRows || "| - | - | - | - | - |"}\n\n## Coverage Map\n\n| Area | Captured coverage | Why it matters |\n|---|---|---|\n${coverageRows || "| - | - | - |"}\n\n## Summary\n\n| Report | Status | Key Findings | Screenshots |\n|---|---|---|---|\n${rows || "| - | - | - | - |"}\n\n## Detail Report Files\n\n| Report | Status | Detail Markdown | JSON Data | Screenshots |\n|---|---|---|---|---|\n${detailRows || "| - | - | - | - | - |"}\n\n## Follow-up Items\n\n${followups.map((x, i) => `${i + 1}. ${x}`).join("\n") || "No obvious follow-up items extracted."}\n\n## Seeded SEO/Growth Reports\n\n${seedRows || "- No default seed reports used"}\n\n## Discovered GSC Reports\n\n${discoveredRows || "- No discovered report links"}\n\n## Source URLs\n\n${(job.urls || []).map((u) => `- ${u}`).join("\n") || "- Current active GSC tab"}\n\n## All Downloaded Files\n\n${allFiles || "- No files exported"}\n`;
+}
+
+function buildGscSummaryHtml(job, indexMarkdown = "") {
+  const pages = job.pages || [];
+  const plan = buildLocalGscActionPlan(job);
+  const coverage = buildGscCoverageRows(job);
+  const findings = buildGscBestPracticeFindings(job);
+  const screenshots = collectGscScreenshotFiles(job);
+  const markdownFiles = uniqueStrings((job.files || []).filter((file) => file.toLowerCase().endsWith(".md")));
+  const highPriority = plan.filter((item) => /high/i.test(item.priority || "")).length;
+  const generatedAt = new Date().toLocaleString();
+  const htmlPlanRows = plan.map((item) => htmlRow([
+    priorityBadge(item.priority),
+    item.area,
+    item.report,
+    item.action,
+    item.evidence
+  ], { rawColumns: [0] })).join("");
+  const htmlCoverageRows = coverage.map((item) => htmlRow([item.area, item.coverage, item.why])).join("");
+  const reportRows = pages.map((page) => htmlRow([
+    htmlLink(page.title || page.url || "Report", reportFilesByExtension(page.files || [], ".md")[0] || page.url || ""),
+    statusBadge(page.status),
+    (page.metrics || []).slice(0, 4).join("; ") || page.error || "-",
+    reportFileLinksHtml(reportFilesByExtension(page.files || [], ".md")),
+    reportFileLinksHtml(reportFilesByExtension(page.files || [], ".json")),
+    reportFileLinksHtml(pageScreenshotFiles(page))
+  ], { rawColumns: [0, 1, 3, 4, 5] })).join("");
+  const gallery = screenshots.slice(0, 80).map((file) => `
+      <figure class="shot">
+        <a href="${htmlAttr(reportRelativeHref(file))}"><img src="${htmlAttr(reportRelativeHref(file))}" alt="${htmlAttr(reportFileName(file))}" loading="lazy"></a>
+        <figcaption>${escapeHtml(reportFileName(file))}</figcaption>
+      </figure>`).join("");
+  const reportDigests = pages.map((page) => buildGscReportDigestHtml(page)).join("");
+  const markdownIndexHtml = markdownToHtml(indexMarkdown);
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GSC Summary - Lily</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --paper: #fffdf8;
+      --ink: #202124;
+      --muted: #6b7280;
+      --line: #dfe4ee;
+      --blue: #0b57d0;
+      --green: #137333;
+      --red: #b3261e;
+      --amber: #b06000;
+      --teal: #006a6a;
+      --soft-blue: #e8f0fe;
+      --soft-green: #e6f4ea;
+      --soft-red: #fce8e6;
+      --soft-amber: #fff4e5;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.55; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell { max-width: 1240px; margin: 0 auto; padding: 28px 22px 64px; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 28px; align-items: end; padding: 30px 0 22px; border-bottom: 1px solid var(--line); }
+    .eyebrow { color: var(--teal); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 12px; }
+    h1 { margin: 10px 0 12px; font-size: clamp(34px, 5vw, 64px); line-height: .96; letter-spacing: 0; }
+    h2 { margin: 0 0 14px; font-size: 24px; letter-spacing: 0; }
+    h3 { margin: 0 0 8px; font-size: 18px; letter-spacing: 0; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    .hero-meta { display: grid; gap: 8px; color: var(--muted); }
+    .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 22px 0 30px; }
+    .stat { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; }
+    .stat b { display: block; font-size: 28px; line-height: 1.05; }
+    .stat span { color: var(--muted); font-size: 13px; }
+    .section { margin: 30px 0; padding-top: 6px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .card { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 18px; min-width: 0; }
+    .card strong { display: block; margin-bottom: 5px; }
+    .lens { border-top: 4px solid var(--blue); }
+    .lens[data-tone="green"] { border-top-color: var(--green); }
+    .lens[data-tone="red"] { border-top-color: var(--red); }
+    .lens[data-tone="amber"] { border-top-color: var(--amber); }
+    .lens[data-tone="teal"] { border-top-color: var(--teal); }
+    table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: table; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 14px; overflow-wrap: anywhere; }
+    th { background: #eef2f8; color: #374151; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    tr:last-child td { border-bottom: 0; }
+    .badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); font-weight: 650; font-size: 12px; white-space: nowrap; }
+    .badge.high { background: var(--soft-red); color: var(--red); border-color: #f3b8b3; }
+    .badge.medium { background: var(--soft-amber); color: var(--amber); border-color: #ffd59a; }
+    .badge.low, .badge.success { background: var(--soft-green); color: var(--green); border-color: #b7dfc0; }
+    .badge.neutral { background: var(--soft-blue); color: var(--blue); border-color: #c6dafc; }
+    .shot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+    .shot { margin: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .shot img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; background: #eef2f8; border-bottom: 1px solid var(--line); }
+    figcaption { padding: 9px 10px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .digest { display: grid; gap: 10px; }
+    .digest .files { display: flex; flex-wrap: wrap; gap: 8px; }
+    .md-body { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 20px; overflow-x: auto; }
+    .md-body h1 { font-size: 30px; line-height: 1.1; }
+    .md-body h2 { margin-top: 24px; }
+    .md-body pre { white-space: pre-wrap; background: #f1f4f9; padding: 12px; border-radius: 6px; border: 1px solid var(--line); }
+    .small { color: var(--muted); font-size: 13px; }
+    @media (max-width: 840px) {
+      .hero, .grid-2, .grid-3, .stat-grid { grid-template-columns: 1fr; }
+      .shell { padding-inline: 14px; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Lily GSC Summary</div>
+        <h1>Search growth, quality, and conversion review</h1>
+        <p>按行业看 GSC 的常用路径汇总：先看需求与点击，再看索引和体验，最后检查富结果、风险和内链机会。</p>
+      </div>
+      <div class="hero-meta">
+        <div><strong>Generated:</strong> ${escapeHtml(generatedAt)}</div>
+        <div><strong>Status:</strong> ${statusBadge(job.status || "running")}</div>
+        <div><strong>Folder:</strong> ${escapeHtml(job.downloadFolder || `Downloads/${job.folder}`)}</div>
+        <div><strong>Sources:</strong> ${(job.urls || []).map((url) => htmlLink(url, url)).join("<br>") || "Current active GSC tab"}</div>
+      </div>
+    </section>
+    <section class="stat-grid" aria-label="Run totals">
+      ${statCard(pages.length, "Reports captured")}
+      ${statCard(screenshots.length, "Screenshots linked")}
+      ${statCard(markdownFiles.length, "Markdown reports")}
+      ${statCard(highPriority, "High priority actions")}
+    </section>
+    <section class="section">
+      <h2>Best-Practice Review Lenses</h2>
+      <div class="grid-3">
+        ${lensCard("Demand & CTR", "先按 Queries / Pages 找高展示低 CTR、下降词、上涨词，再回到标题、摘要、首屏承诺和内链。", "teal")}
+        ${lensCard("Indexing", "只要页面未索引，就不会贡献自然流量；优先处理 Website source、pages 数高且 examples 明确的问题。", "amber")}
+        ${lensCard("Page Experience", "CWV 按 Mobile/Desktop、INP/LCP/CLS 和 URL groups 看，优先修影响 URL 最多的模板。", "red")}
+        ${lensCard("SERP Enhancements", "Product、Merchant、Review、FAQ、Breadcrumb 等富结果影响搜索展示、信任和点击率。", "green")}
+        ${lensCard("Conversion", "把自然入口页和上涨需求映射到 CTA、FAQ、价格/能力承诺、案例和内部推荐。", "blue")}
+        ${lensCard("Risk & Trust", "HTTPS、Manual actions、Security issues 是增长前置条件，先排除再做内容和转化优化。", "amber")}
+      </div>
+    </section>
+    <section class="section">
+      <h2>Priority Action Plan</h2>
+      ${htmlTable(["Priority", "Area", "Report", "Action", "Evidence"], htmlPlanRows || htmlEmptyRow(5))}
+    </section>
+    <section class="section">
+      <h2>Coverage Map</h2>
+      ${htmlTable(["Area", "Captured coverage", "Why it matters"], htmlCoverageRows || htmlEmptyRow(3))}
+    </section>
+    <section class="section grid-2">
+      ${findingTable("Biggest Declines", findings.declines, ["Type", "Item", "Change", "Evidence"])}
+      ${findingTable("Biggest Growth", findings.growth, ["Type", "Item", "Change", "Evidence"])}
+      ${findingTable("High-Impression Low-CTR", findings.lowCtr, ["Dimension", "Item", "CTR", "Evidence"])}
+      ${findingTable("Indexing Fix Queue", findings.indexing, ["Reason", "Pages", "Source", "Evidence"])}
+      ${findingTable("CWV URL Group Queue", findings.cwv, ["Device", "Issue", "URLs", "Evidence"])}
+      ${findingTable("SERP / Risk Signals", findings.serpRisk, ["Area", "Report", "Signal", "Evidence"])}
+    </section>
+    <section class="section">
+      <h2>Report Library</h2>
+      ${htmlTable(["Report", "Status", "Key findings", "Markdown", "JSON", "Screenshots"], reportRows || htmlEmptyRow(6))}
+    </section>
+    <section class="section">
+      <h2>Screenshot Gallery</h2>
+      <div class="shot-grid">${gallery || "<p>No screenshots exported.</p>"}</div>
+    </section>
+    <section class="section">
+      <h2>HTML Report Digests</h2>
+      <div class="grid-2">${reportDigests || "<p>No report digests available.</p>"}</div>
+    </section>
+    <section class="section">
+      <h2>Converted Markdown Index</h2>
+      <div class="md-body">${markdownIndexHtml || "<p>No Markdown index available.</p>"}</div>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+function buildGscBestPracticeFindings(job) {
+  const out = { declines: [], growth: [], lowCtr: [], indexing: [], cwv: [], serpRisk: [] };
+  const add = (bucket, row, key = row.join("|")) => {
+    if (!out[bucket].some((item) => item.join("|") === key)) out[bucket].push(row);
+  };
+  for (const page of job.pages || []) {
+    if (page.performanceInsights) {
+      for (const target of page.performanceInsights.targets || []) {
+        for (const row of target.queryRows || []) {
+          const item = [target.label, row.query, [row.direction, row.changePercent, row.clicks].filter(Boolean).join(" "), (row.similarQueries || []).slice(0, 5).join(", ") || target.label];
+          if (/down/i.test(row.direction || "")) add("declines", item);
+          if (/up/i.test(row.direction || "")) add("growth", item);
+        }
+        for (const row of target.searchAnalyticsRows || []) {
+          const label = target.breakdown === "query" ? "Query" : "Page";
+          const item = [`${label} / ${target.label}`, row.dimension || row.url || row.values?.[0] || "-", row.clickDelta || row.changePercent || "-", row.url || (row.values || []).slice(0, 4).join(" | ")];
+          if (target.sortDirection === "down") add("declines", item);
+          if (target.sortDirection === "up") add("growth", item);
+        }
+      }
+    }
+    if (page.searchAnalytics) {
+      for (const dimension of page.searchAnalytics.dimensions || []) {
+        const headers = dimension.headers || [];
+        const impressionsIndex = findHeaderIndex(headers, [/impressions/i, /展示/]);
+        const ctrIndex = findHeaderIndex(headers, [/ctr/i, /点击率/]);
+        const clicksIndex = findHeaderIndex(headers, [/clicks/i, /点击/]);
+        const positionIndex = findHeaderIndex(headers, [/position/i, /排名/]);
+        for (const row of dimension.rows || []) {
+          const values = row.values || [];
+          const impressions = parseReportNumber(values[impressionsIndex]);
+          const ctr = parseReportPercent(values[ctrIndex]);
+          const clicks = parseReportNumber(values[clicksIndex]);
+          const position = parseReportNumber(values[positionIndex]);
+          if (Number.isFinite(impressions) && Number.isFinite(ctr) && impressions >= 100 && ctr <= 2.5) {
+            add("lowCtr", [
+              dimension.label || "Search Analytics",
+              values[0] || row.dimension || row.url || "-",
+              values[ctrIndex] || `${ctr}%`,
+              `Impressions ${values[impressionsIndex] || impressions}; Clicks ${values[clicksIndex] || clicks || 0}; Position ${values[positionIndex] || position || "-"}`
+            ]);
+          }
+        }
+      }
+    }
+    if (page.indexing) {
+      for (const reason of page.indexing.reasons || []) {
+        add("indexing", [
+          reason.reason || "-",
+          reason.pages || "-",
+          reason.source || "-",
+          [reason.validation, reason.examples?.[0]?.url].filter(Boolean).join(" | ") || page.url
+        ]);
+      }
+    }
+    if (page.cwv) {
+      for (const device of page.cwv.devices || []) {
+        for (const issue of device.issues || []) {
+          add("cwv", [
+            device.name || "-",
+            issue.issue || "-",
+            issue.urls || "-",
+            issue.urlGroups?.[0]?.exampleUrl || issue.evidence || page.url
+          ]);
+        }
+      }
+    }
+    const joined = `${page.title || ""} ${(page.metrics || []).join(" ")} ${(page.issueSignals || []).join(" ")}`;
+    if (/Product|Merchant|Breadcrumb|FAQ|Review|AMP|Logo|Organization|Profile|Discussion|Video|Events|Courses|Software|Dataset/i.test(joined)) {
+      add("serpRisk", ["Structured data", page.title || "-", (page.metrics || page.issueSignals || [])[0] || "Rich result report captured", reportFileLinksHtml(reportFilesByExtension(page.files || [], ".md")) || page.url], `${page.title}|structured`);
+    }
+    if (/Manual actions|Security|HTTPS|manual action|security issue|Non HTTPS/i.test(joined)) {
+      add("serpRisk", ["Trust/Risk", page.title || "-", (page.metrics || page.issueSignals || [])[0] || "Risk report captured", page.url], `${page.title}|risk`);
+    }
+  }
+  out.declines = out.declines.slice(0, 20);
+  out.growth = out.growth.slice(0, 20);
+  out.lowCtr = out.lowCtr.slice(0, 20);
+  out.indexing = out.indexing.sort((a, b) => parseReportNumber(b[1]) - parseReportNumber(a[1])).slice(0, 20);
+  out.cwv = out.cwv.sort((a, b) => parseReportNumber(b[2]) - parseReportNumber(a[2])).slice(0, 20);
+  out.serpRisk = out.serpRisk.slice(0, 20);
+  return out;
+}
+
+function buildGscReportDigestHtml(page) {
+  const screenshots = pageScreenshotFiles(page).slice(0, 4);
+  const files = [
+    ...reportFilesByExtension(page.files || [], ".md"),
+    ...reportFilesByExtension(page.files || [], ".json")
+  ];
+  const detailHtml = buildGscReportDetailHtml(page);
+  return `<article class="card digest">
+    <h3>${escapeHtml(page.title || page.url || "Report")}</h3>
+    <p>${escapeHtml((page.metrics || []).slice(0, 4).join("; ") || page.error || page.url || "-")}</p>
+    <div class="files">${files.map((file) => `<span class="badge neutral">${htmlLink(reportFileName(file), file)}</span>`).join("") || "<span class=\"small\">No detail files</span>"}</div>
+    ${detailHtml}
+    <div class="shot-grid">${screenshots.map((file) => `<figure class="shot"><a href="${htmlAttr(reportRelativeHref(file))}"><img src="${htmlAttr(reportRelativeHref(file))}" alt="${htmlAttr(reportFileName(file))}" loading="lazy"></a><figcaption>${escapeHtml(reportFileName(file))}</figcaption></figure>`).join("")}</div>
+  </article>`;
+}
+
+function buildGscReportDetailHtml(page) {
+  if (page.cwv) {
+    const rows = (page.cwv.devices || []).flatMap((device) => (device.issues || []).map((issue) => [
+      device.name || "-",
+      issue.severity || "-",
+      issue.issue || "-",
+      issue.urls || "-",
+      issue.urlGroups?.[0]?.exampleUrl || issue.error || "-"
+    ])).slice(0, 8);
+    return `<div>${htmlTable(["Device", "Severity", "Issue", "URLs", "Evidence"], rows.map((row) => htmlRow(row)).join("") || htmlEmptyRow(5))}</div>`;
+  }
+  if (page.indexing) {
+    const rows = (page.indexing.reasons || []).map((reason) => [
+      reason.reason || "-",
+      reason.source || "-",
+      reason.validation || "-",
+      reason.pages || "-",
+      reason.examples?.[0]?.url || reason.error || "-"
+    ]).slice(0, 8);
+    return `<div>${htmlTable(["Reason", "Source", "Validation", "Pages", "Example"], rows.map((row) => htmlRow(row)).join("") || htmlEmptyRow(5))}</div>`;
+  }
+  if (page.performanceInsights) {
+    const rows = (page.performanceInsights.targets || []).flatMap((target) => {
+      const queryRows = (target.queryRows || []).slice(0, 3).map((row) => [
+        target.label || "-",
+        row.query || "-",
+        [row.direction, row.changePercent, row.clicks].filter(Boolean).join(" ") || "-",
+        (row.similarQueries || []).slice(0, 4).join(", ") || "-"
+      ]);
+      const analyticsRows = (target.searchAnalyticsRows || []).slice(0, 3).map((row) => [
+        target.label || "-",
+        row.dimension || row.url || row.values?.[0] || "-",
+        row.clickDelta || row.changePercent || "-",
+        row.url || (row.values || []).slice(0, 4).join(" | ")
+      ]);
+      return [...queryRows, ...analyticsRows];
+    }).slice(0, 10);
+    return `<div>${htmlTable(["Target", "Item", "Change", "Evidence"], rows.map((row) => htmlRow(row)).join("") || htmlEmptyRow(4))}</div>`;
+  }
+  if (page.searchAnalytics) {
+    const rows = (page.searchAnalytics.dimensions || []).flatMap((dimension) => (dimension.rows || []).slice(0, 3).map((row) => [
+      dimension.label || "-",
+      (row.values || [])[0] || row.url || "-",
+      (row.values || []).slice(1, 5).join(" | ") || "-"
+    ])).slice(0, 10);
+    return `<div>${htmlTable(["Dimension", "Item", "Metrics"], rows.map((row) => htmlRow(row)).join("") || htmlEmptyRow(3))}</div>`;
+  }
+  const genericRows = (page.tables || page.extracted?.tables || [])
+    .flatMap((table) => (table.rows || []).slice(0, 3).map((row) => [table.caption || "Table", (row || []).slice(0, 6).join(" | ")]))
+    .slice(0, 8);
+  if (genericRows.length) return `<div>${htmlTable(["Section", "Rows"], genericRows.map((row) => htmlRow(row)).join(""))}</div>`;
+  return "";
+}
+
+function collectGscScreenshotFiles(job) {
+  return uniqueStrings((job.pages || []).flatMap(pageScreenshotFiles));
+}
+
+function findingTable(title, rows, headers) {
+  const body = (rows || []).map((row) => htmlRow(row)).join("") || htmlEmptyRow(headers.length);
+  return `<div class="card"><h2>${escapeHtml(title)}</h2>${htmlTable(headers, body)}</div>`;
+}
+
+function htmlTable(headers, bodyRows) {
+  return `<table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+}
+
+function htmlRow(values, options = {}) {
+  const rawColumns = new Set(options.rawColumns || []);
+  return `<tr>${(values || []).map((value, index) => `<td>${rawColumns.has(index) ? value || "-" : escapeHtml(value || "-")}</td>`).join("")}</tr>`;
+}
+
+function htmlEmptyRow(count) {
+  return `<tr>${Array.from({ length: count }, () => "<td>-</td>").join("")}</tr>`;
+}
+
+function statCard(value, label) {
+  return `<div class="stat"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span></div>`;
+}
+
+function lensCard(title, body, tone) {
+  return `<div class="card lens" data-tone="${htmlAttr(tone || "blue")}"><strong>${escapeHtml(title)}</strong><p>${escapeHtml(body)}</p></div>`;
+}
+
+function priorityBadge(priority) {
+  const p = (priority || "Medium").toString();
+  const cls = /high/i.test(p) ? "high" : (/low/i.test(p) ? "low" : "medium");
+  return `<span class="badge ${cls}">${escapeHtml(p)}</span>`;
+}
+
+function statusBadge(status) {
+  const s = (status || "").toString();
+  const cls = /done|success/i.test(s) ? "success" : (/failed|error|stopped/i.test(s) ? "high" : "neutral");
+  return `<span class="badge ${cls}">${escapeHtml(s || "-")}</span>`;
+}
+
+function htmlLink(label, fileOrUrl) {
+  const href = reportRelativeHref(fileOrUrl);
+  if (!href) return escapeHtml(label || "-");
+  return `<a href="${htmlAttr(href)}">${escapeHtml(label || reportFileName(fileOrUrl) || href)}</a>`;
+}
+
+function reportFileLinksHtml(files) {
+  const links = uniqueStrings(files || []).map((file) => htmlLink(reportFileName(file), file)).filter(Boolean);
+  return links.length ? links.join("<br>") : "-";
+}
+
+function reportRelativeHref(fileOrUrl) {
+  const value = (fileOrUrl || "").toString();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  return `./${encodeReportHref(reportFileName(value))}`;
+}
+
+function encodeReportHref(name) {
+  return (name || "").split("/").map((part) => encodeURIComponent(part)).join("/");
+}
+
+function htmlAttr(value) {
+  return escapeHtml(value).replace(/`/g, "&#096;");
+}
+
+function findHeaderIndex(headers, patterns) {
+  return (headers || []).findIndex((header) => (patterns || []).some((pattern) => pattern.test(header || "")));
+}
+
+function parseReportNumber(value) {
+  const raw = (value ?? "").toString().replace(/[−–—]/g, "-").replace(/,/g, "").trim();
+  const match = raw.match(/[-+]?\d+(?:\.\d+)?\s*([KMB万億亿])?/i);
+  if (!match) return NaN;
+  let num = Number(match[0].replace(/[KMB万億亿]/ig, "").trim());
+  if (!Number.isFinite(num)) return NaN;
+  const unit = (match[1] || "").toLowerCase();
+  if (unit === "k") num *= 1000;
+  else if (unit === "m") num *= 1000000;
+  else if (unit === "b") num *= 1000000000;
+  else if (unit === "万") num *= 10000;
+  else if (unit === "亿" || unit === "億") num *= 100000000;
+  return num;
+}
+
+function parseReportPercent(value) {
+  const num = parseReportNumber(value);
+  return Number.isFinite(num) ? num : NaN;
+}
+
+function markdownToHtml(markdown) {
+  const lines = (markdown || "").split(/\r?\n/);
+  const out = [];
+  let inList = false;
+  let inTable = false;
+  let inCode = false;
+  const closeBlocks = () => {
+    if (inList) { out.push("</ul>"); inList = false; }
+    if (inTable) { out.push("</tbody></table>"); inTable = false; }
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^```/.test(line.trim())) {
+      if (inCode) {
+        out.push("</code></pre>");
+        inCode = false;
+      } else {
+        closeBlocks();
+        out.push("<pre><code>");
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      out.push(escapeHtml(line));
+      continue;
+    }
+    if (!line.trim()) {
+      closeBlocks();
+      continue;
+    }
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      closeBlocks();
+      const level = Math.min(heading[1].length, 4);
+      out.push(`<h${level}>${inlineMarkdownToHtml(heading[2])}</h${level}>`);
+      continue;
+    }
+    if (/^\|.+\|$/.test(line.trim())) {
+      const next = lines[i + 1] || "";
+      if (!inTable && /^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(next.trim())) {
+        closeBlocks();
+        const cells = splitMarkdownTableRow(line);
+        out.push(`<table><thead><tr>${cells.map((cell) => `<th>${inlineMarkdownToHtml(cell)}</th>`).join("")}</tr></thead><tbody>`);
+        inTable = true;
+        i += 1;
+        continue;
+      }
+      if (inTable) {
+        const cells = splitMarkdownTableRow(line);
+        out.push(`<tr>${cells.map((cell) => `<td>${inlineMarkdownToHtml(cell)}</td>`).join("")}</tr>`);
+        continue;
+      }
+    }
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    if (bullet) {
+      if (!inList) { closeBlocks(); out.push("<ul>"); inList = true; }
+      out.push(`<li>${inlineMarkdownToHtml(bullet[1])}</li>`);
+      continue;
+    }
+    closeBlocks();
+    out.push(`<p>${inlineMarkdownToHtml(line)}</p>`);
+  }
+  closeBlocks();
+  if (inCode) out.push("</code></pre>");
+  return out.join("\n");
+}
+
+function splitMarkdownTableRow(line) {
+  return (line || "").trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+function inlineMarkdownToHtml(text) {
+  return escapeHtml(text || "")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, href) => `<a href="${htmlAttr(href)}">${label}</a>`)
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
 function buildGscCoverageRows(job) {

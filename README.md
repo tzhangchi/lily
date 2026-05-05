@@ -48,10 +48,11 @@ Side Panel 底部新增 **GSC Operator**：
 - **Core Web Vitals 下钻**：遇到 Core Web Vitals summary 页面时，会复用当前页签依次打开 Mobile / Desktop 的 Open report，抓取 “Why URLs aren't considered good” 问题表，并逐行点击原因进入 URL groups 明细表导出。
 - **Page Indexing 下钻**：遇到 Page Indexing 页面时，会抓取 “Why pages aren’t indexed” 原因表，并逐行点击原因进入 drilldown，导出 Examples URL / Last crawled 明细。
 - **Performance Insights 下钻**：遇到 Performance Insights 页面时，会先抓取 `Queries leading to your site` 的 Top / Trending up / Trending down 查询组和 Clicks，再补抓 View More 中最明显下降 / 上升的关键词与页面 Search Analytics 明细，然后抓取 Content 的 LAST28DAYS Top / Trending up / Trending down，以及 LAST7DAYS Trending down 页面明细，并导出下降页的 Search Analytics page breakdown。
+- **Summary.html 汇总**：每次报告会额外生成 `Summary.html`，把行业常用的 GSC 读法固化成 HTML：需求与 CTR、索引、Core Web Vitals、富结果、转化、信任风险、内链权重；并把截图 gallery、报告库链接、本地行动计划、关键下降/上涨项和转换后的 Markdown 总索引放在一个可直接打开的页面里。
 - **Search results 下钻**：遇到 Search results / Search Analytics 页面时，会自动抓取 Queries、Pages、Countries、Devices、Search appearance、Dates 六个维度，帮助定位高展示低点击词、自然入口页、市场、设备和富结果表现。
 - **通用报告抽取**：对 Discover、Links、Sitemaps、HTTPS、Videos、富结果等未定制下钻的报告，Lily 会抽取关键指标、真实 table、虚拟 DOM 行、卡片文本、文本快照、问题信号、报告区块和本地行动建议，写入单页 Markdown 和总索引。
 - **本地行动计划**：即使 AI 摘要不可用，`gsc-report-index.md` 也会生成 SEO / Conversion / Page quality / Indexing / Structured data / Risk 的规则化行动计划和覆盖地图，便于直接分配修复任务。
-- **交付文件**：每次 Capture Reports 会生成 `gsc-report-index.md` 总目录、各报告明细 `.md`、结构化 `.json`、截图 `.png`，全部放在同一个 `Downloads/lily-gsc-reports-yyyy-mm-dd-hh-mm-ss/` 目录。所有图片、Markdown 和 JSON 文件都使用报告类型、设备、原因、Tab 等语义化文件名；下载由 background 强制指定文件名，避免 Chrome 把截图落成 `download.png`。`gsc-report-index.md` 会链接全部截图、明细数据文件、默认种子报告和递归发现报告，方便直接反馈给团队。
+- **交付文件**：每次 Capture Reports 会生成 `Summary.html`、`gsc-report-index.md` 总目录、各报告明细 `.md`、结构化 `.json`、截图 `.png`，全部放在同一个 `Downloads/lily-gsc-reports-yyyy-mm-dd-hh-mm-ss/` 目录。所有图片、Markdown 和 JSON 文件都使用报告类型、设备、原因、Tab 等语义化文件名；下载由 background 强制指定文件名，避免 Chrome 把截图落成 `download.png`。`Summary.html` 和 `gsc-report-index.md` 会链接全部截图、明细数据文件、默认种子报告和递归发现报告，方便直接反馈给团队。
 - **AI 摘要**：Chrome 扩展不能直接启动本地 Node/Next.js 进程；源码里会在 Chrome 启动 / 设置保存时探测 `aiServerUrl` 的 `/api/health`。如果 Settings 中启用了 AI 且服务可用，GSC 报告会额外调用 AI Server 生成优先级摘要并写入 `gsc-report-index.md`。AI Server 可以本地运行，也可以部署到 Vercel 后把 URL 填进 Settings。
 - 报告默认下载到：`Downloads/lily-gsc-reports-yyyy-mm-dd-hh-mm-ss/`
 
