@@ -263,6 +263,36 @@ textarea { min-height: 84px; resize: vertical; }
   text-overflow: ellipsis;
 }
 .gsc-report-url-remove { padding: 8px 10px; }
+.gsc-progress {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-secondary);
+}
+.gsc-progress[hidden] { display: none; }
+.gsc-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.gsc-progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  margin-top: 8px;
+}
+.gsc-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-blue);
+  transition: width 240ms ease;
+}
 .issue-list { display: flex; flex-direction: column; gap: 10px; }
 .issue { display: flex; gap: 10px; align-items: flex-start; }
 .issue-text { font-size: 12px; color: var(--text-primary); line-height: 1.5; }

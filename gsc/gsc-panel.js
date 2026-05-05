@@ -11,7 +11,7 @@ const DEFAULT_REPORT_URLS = [];
 const DEFAULT_REPORT_FIELD_COUNT = 3;
 const REPORT_URL_PLACEHOLDER = "留空则抓取当前已打开的 GSC 报告页";
 const GSC_REPORT_DOWNLOAD_ROOT = "lily-gsc-reports";
-const GSC_REPORT_DOWNLOAD_DISPLAY_ROOT = `Downloads/${GSC_REPORT_DOWNLOAD_ROOT}`;
+const GSC_REPORT_DOWNLOAD_DISPLAY_ROOT = `Downloads/${GSC_REPORT_DOWNLOAD_ROOT}-yyyy-mm-dd-hh-mm-ss`;
 
 const REQUEST_INDEXING_TEXTS = ["Request indexing", "请求编入索引"];
 const CLOSE_TEXTS = ["Got it", "Close", "关闭", "完成"];
@@ -98,7 +98,7 @@ function renderGscUi() {
               <input id="gscMaxDepth" class="input" style="max-width:120px;" type="number" min="0" max="3" value="2" />
               <input id="gscMaxPages" class="input" style="max-width:120px;" type="number" min="1" max="60" value="30" />
             </div>
-            <div class="hint">请先在当前页签打开正确账号 / Property 的 GSC 报告。报告抓取只复用当前页签；从 Overview 开始时会递归发现 SEO / Growth 关键导航和卡片报告。默认下载到 Downloads/lily-gsc-reports/时间戳/，gsc-report-index.md 会汇总全部截图和明细数据。</div>
+            <div class="hint">请先在当前页签打开正确账号 / Property 的 GSC 报告。报告抓取只复用当前页签；从 Overview 开始时会递归发现 SEO / Growth 关键导航和卡片报告。默认下载到 Downloads/lily-gsc-reports-yyyy-mm-dd-hh-mm-ss/，gsc-report-index.md 会汇总全部截图和明细数据。</div>
           </div>
         </label>
       </div>
@@ -107,6 +107,15 @@ function renderGscUi() {
         <button id="gscStopReports" class="btn btn-ghost">Stop</button>
       </div>
       <div id="gscReportStatus" class="muted" style="margin-top:10px;">未开始</div>
+      <div id="gscReportProgress" class="gsc-progress" hidden>
+        <div class="gsc-progress-meta">
+          <span id="gscReportProgressLabel">准备中…</span>
+          <span id="gscReportProgressCount">0%</span>
+        </div>
+        <div class="gsc-progress-track">
+          <div id="gscReportProgressBar" class="gsc-progress-bar"></div>
+        </div>
+      </div>
       <div id="gscReportFiles" class="small" style="margin-top:10px;max-height:180px;overflow:auto;"></div>
     </div>
   `;
@@ -222,6 +231,12 @@ async function restoreJobState() {
     const job = data[GSC_STORAGE_KEYS.reportJob];
     if (job.urls?.length) setReportUrlFields(job.urls);
     setReportStatus(formatReportStatus(job));
+    if (job.status === "running") {
+      const remaining = job.remainingQueue?.length || 0;
+      setReportProgress((job.pages || []).length, Math.max((job.pages || []).length + remaining, job.urls?.length || 1), "恢复中的抓取任务");
+    } else if ((job.pages || []).length) {
+      setReportProgress((job.pages || []).length, (job.pages || []).length, job.status === "stopped" ? "上次任务已停止" : "上次任务已完成");
+    }
     renderReportFiles(job.files || []);
   }
 }
@@ -592,20 +607,25 @@ async function runReportCaptureJob() {
   const folder = buildGscReportFolderName(new Date());
   const job = { type: "reports", urls, seedReports, recursiveDiscovery, files: [], pages: [], status: "running", startedAt: new Date().toISOString(), folder, downloadFolder: `Downloads/${folder}`, tabId: activeTab.id };
   await saveReportJob(job);
+  setReportStatus(`开始抓取，目录 ${job.downloadFolder}`);
 
   const queue = queueUrls.map((url) => ({ url, depth: 0, source: seedReports.some((seed) => canonicalGscUrlKey(alignGoogleAccountPath(seed.url, currentUrl)) === canonicalGscUrlKey(url)) ? "seed" : "entry" }));
   const seen = new Set();
+  const progressTotal = () => Math.min(maxPages, Math.max(queueUrls.length, job.pages.length + queue.length, job.pages.length || 1));
+  setReportProgress(0, progressTotal(), "已开始，准备打开第一个 GSC 报告…");
   while (queue.length && job.pages.length < maxPages && !reportController.stopped) {
     const item = queue.shift();
     const itemKey = canonicalGscUrlKey(item?.url || "");
     if (!item?.url || seen.has(itemKey)) continue;
     seen.add(itemKey);
     setReportStatus(`抓取 ${job.pages.length + 1}/${maxPages}: ${item.url}`);
+    setReportProgress(job.pages.length, progressTotal(), `抓取中：${job.pages.length + 1}/${progressTotal()}`);
 
     const page = await captureSingleReportPage(activeTab.id, item.url, folder, job.pages.length + 1, item.depth, { cwvDrilldown, indexingDrilldown, performanceDrilldown, recursiveDiscovery, maxPages });
     job.pages.push(page);
     job.files.push(...(page.files || []));
     renderReportFiles(job.files);
+    setReportProgress(job.pages.length, progressTotal(), `已完成 ${job.pages.length} 个报告，继续发现和下载文件…`);
     await saveReportJob(job);
 
     const candidateUrls = uniqueStrings([
@@ -631,8 +651,10 @@ async function runReportCaptureJob() {
   job.truncated = queue.length > 0 && job.pages.length >= maxPages;
   job.remainingQueue = queue.slice(0, 20).map((item) => ({ url: item.url, depth: item.depth, source: item.source }));
   job.files = uniqueStrings([...job.files, indexPath, manifestPath]);
+  setReportProgress(job.pages.length, Math.max(job.pages.length, 1), "生成索引与 manifest…");
 
   if (aiReportSummary && !reportController.stopped) {
+    setReportProgress(job.pages.length, Math.max(job.pages.length, 1), "生成 AI 摘要（如果已启用）…");
     const ai = await buildAiGscReportSummary(job);
     if (ai?.ok) job.aiSummary = ai.ai;
     else if (ai?.error && !/AI 未启用|ai server/i.test(ai.error)) job.aiSummaryError = ai.error;
@@ -644,6 +666,7 @@ async function runReportCaptureJob() {
   await downloadTextFile(manifestPath, manifest, "application/json;charset=utf-8");
   await saveReportJob(job);
   setReportStatus(formatReportStatus(job));
+  setReportProgress(job.pages.length, Math.max(job.pages.length, 1), job.status === "stopped" ? "已停止" : "完成");
   renderReportFiles(job.files);
 }
 
@@ -686,6 +709,8 @@ async function captureSingleReportPage(tabId, url, folder, index, depth, options
       screenshot: pngPath,
       metrics: extracted?.metrics || [],
       tables: extracted?.tables || [],
+      cards: extracted?.cards || [],
+      visibleRows: extracted?.visibleRows || [],
       discoveredReports: extracted?.discoveredReports || [],
       detailUrls: uniqueStrings([...(extracted?.detailUrls || []), ...((extracted?.discoveredReports || []).map((report) => report.url))])
     };
@@ -746,7 +771,6 @@ async function captureCoreWebVitalsDrilldown(tabId, startUrl, folder, index, dep
       const issueReady = await waitForPageCondition(tabId, pageHasCwvIssueTable, [], 25000);
       if (!issueReady?.ok) {
         device.errors.push(issueReady?.error || `Issue table did not load for ${deviceName}`);
-        continue;
       }
       await sleep(1500);
     } else {
@@ -758,16 +782,24 @@ async function captureCoreWebVitalsDrilldown(tabId, startUrl, folder, index, dep
     device.issueReportUrl = normalizeUrl(issueTab?.url || "");
     const issueRows = await runInTab(tabId, pageExtractCwvIssueRows, []);
     device.issues = issueRows?.rows || [];
+    device.headings = issueRows?.snapshot?.headings || [];
+    device.visibleRows = issueRows?.snapshot?.visibleRows || [];
+    device.cards = issueRows?.snapshot?.cards || [];
+    device.tables = issueRows?.snapshot?.tables || [];
+    device.textSnapshot = issueRows?.snapshot?.textSnapshot || "";
+    await runInTab(tabId, pageScrollToCwvIssueTable, []);
+    const issueScreenshotPath = `${folder}/${slugBase}-${safeSlug(deviceName)}-issues.png`;
+    try {
+      await downloadDataUrlFile(issueScreenshotPath, await captureReportScreenshot(tabId));
+      files.push(issueScreenshotPath);
+      device.issueScreenshot = issueScreenshotPath;
+    } catch (e) {
+      device.errors.push(`Issue screenshot failed: ${e?.message || String(e)}`);
+    }
     if (!device.issues.length) {
       device.errors.push(issueRows?.error || "No Core Web Vitals issue rows found");
       continue;
     }
-
-    await runInTab(tabId, pageScrollToCwvIssueTable, []);
-    const issueScreenshotPath = `${folder}/${slugBase}-${safeSlug(deviceName)}-issues.png`;
-    await downloadDataUrlFile(issueScreenshotPath, await captureReportScreenshot(tabId));
-    files.push(issueScreenshotPath);
-    device.issueScreenshot = issueScreenshotPath;
 
     for (let i = 0; i < device.issues.length && remainingIssueDrilldowns > 0; i++) {
       if (reportController.stopped) break;
@@ -1365,6 +1397,7 @@ async function pageAutoScroll() {
 function pageExtractReportMetrics(detailTexts) {
   const text = document.body?.innerText || "";
   const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const pageHeading = clean(document.querySelector('[role="heading"][aria-level="1"], h1')?.innerText || document.querySelector('[role="heading"], h1')?.innerText || "");
   const title = pageHeading || clean(document.title) || location.pathname;
   const headings = Array.from(document.querySelectorAll("h1,h2,h3"))
@@ -1402,10 +1435,29 @@ function pageExtractReportMetrics(detailTexts) {
     const caption = clean(before?.querySelector?.("h1,h2,h3,[role='heading']")?.innerText || before?.querySelector?.(".cPSNDf,.ZxwVRb")?.innerText || `Table ${index + 1}`);
     return { caption, headers, rows };
   };
-  const tables = Array.from(document.querySelectorAll("table"))
+  let tables = Array.from(document.querySelectorAll("table"))
     .map(extractTable)
     .filter((table) => table.rows.length)
     .slice(0, 8);
+  const virtualRows = Array.from(document.querySelectorAll("[role='row'], [data-rowid], .nJ0sOc, .ptEsvc, .SmR8"))
+    .filter(visible)
+    .map((row) => {
+      const cells = Array.from(row.querySelectorAll("[role='cell'], td, th, [data-label]")).filter(visible);
+      const values = (cells.length ? cells : Array.from(row.children || []).filter(visible))
+        .map((cell) => compactUrlCell(cell.getAttribute("data-string-value") || cell.getAttribute("data-numeric-value") || cell.innerText || cell.textContent))
+        .filter(Boolean);
+      return values.length ? Array.from(new Set(values)) : [clean(row.innerText || row.textContent || "")].filter(Boolean);
+    })
+    .filter((row) => row.length && row.join(" ").length <= 1200)
+    .slice(0, 120);
+  if (!tables.length && virtualRows.length) {
+    tables = [{ caption: "Visible GSC rows (virtual DOM fallback)", headers: [], rows: virtualRows }];
+  }
+  const cards = Array.from(document.querySelectorAll(".VfPpkd-WsjYwc, .KC1dQ, section, c-wiz, [role='dialog']"))
+    .filter(visible)
+    .map((el) => clean(el.innerText || el.textContent || ""))
+    .filter((value) => value && value.length >= 20 && value.length <= 1200 && /\d|clicks|impressions|indexed|valid|invalid|issue|good|poor|url|pages?|网址|页面|有效|无效|问题|收录|索引/i.test(value))
+    .slice(0, 40);
 
   const norm = (s) => clean(s).toLowerCase();
   const wanted = (detailTexts || []).map(norm);
@@ -1485,6 +1537,8 @@ function pageExtractReportMetrics(detailTexts) {
     headings,
     metrics,
     tables,
+    cards,
+    visibleRows: virtualRows.slice(0, 80),
     discoveredReports,
     textSnapshot: text.slice(0, 5000),
     detailUrls: Array.from(new Set([...detailUrls, ...discoveredReports.map((report) => report.url)])).slice(0, 40)
@@ -1548,44 +1602,146 @@ function pageClickCwvDeviceReport(deviceName) {
 }
 
 function pageHasCwvIssueTable() {
-  const rows = Array.from(document.querySelectorAll("tbody tr"));
-  const issueRows = rows.filter((row) => row.querySelector('[data-label="issue"]') || /inp issue|lcp issue|cls issue/i.test(row.innerText || ""));
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const rows = Array.from(document.querySelectorAll("tbody tr, [role='row'], [data-rowid], .nJ0sOc, .ptEsvc, .SmR8"))
+    .filter(visible);
+  const issueRows = rows.filter((row) => row.querySelector('[data-label="issue"]') || /inp issue|lcp issue|cls issue|问题/i.test(row.innerText || ""));
   const text = document.body?.innerText || "";
-  const ok = issueRows.length > 0 && (/why urls aren't considered good|severity|validation|urls/i.test(text));
+  const hasIssueText = /inp issue|lcp issue|cls issue|why urls aren't considered good|网址核心指标|问题/i.test(text);
+  const ok = issueRows.length > 0 || hasIssueText;
   return { ok, rows: issueRows.length, url: location.href, error: ok ? "" : "Core Web Vitals issue table not found" };
 }
 
 function pageExtractCwvIssueRows() {
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
-  const cellText = (row, label, fallbackIndex) => {
-    const cell = row.querySelector(`[data-label="${label}"]`) || Array.from(row.querySelectorAll("td"))[fallbackIndex];
-    if (!cell) return "";
-    return clean(cell.getAttribute("data-string-value") || cell.getAttribute("data-numeric-value") || cell.innerText || cell.textContent || "");
+  const compactUrlCell = (value) => {
+    const raw = clean(value);
+    if (!/https?:\/\//i.test(raw)) return raw;
+    const compact = raw.replace(/\s+/g, "");
+    const match = compact.match(/https?:\/\/.+/i);
+    return match ? match[0] : compact;
   };
-  const rows = Array.from(document.querySelectorAll("tbody tr"))
+  const cellText = (cell) => {
+    if (!cell) return "";
+    return compactUrlCell(cell.getAttribute("data-string-value") || cell.getAttribute("data-numeric-value") || cell.innerText || cell.textContent || "");
+  };
+  const pickMatch = (text, re) => clean(text.match(re)?.[0] || text.match(re)?.[1] || "");
+  const findIssue = (text) => {
+    const source = clean(text);
+    return pickMatch(source, /\b(?:INP|LCP|CLS)\s+issue\b[^,\n。]*/i)
+      || pickMatch(source, /\b(?:INP|LCP|CLS)\b[^,\n。]{0,90}/i)
+      || pickMatch(source, /[^,\n。]{0,40}(?:issue|问题)[^,\n。]{0,90}/i);
+  };
+  const findSeverity = (text) => pickMatch(text, /needs improvement|poor|good|较差|良好|需要改进/i);
+  const findValidation = (text) => pickMatch(text, /not started|started|failed|passed|n\/a|未开始|已开始|失败|通过|已通过/i);
+  const findUrls = (values, text) => {
+    const withUnits = clean(text.match(/(\d[\d,.]*)\s*(?:URLs?|pages?|网址|页面)/i)?.[1] || "");
+    if (withUnits) return withUnits;
+    const likely = values.find((value) => /\d/.test(value) && /url|page|网址|页面/i.test(value));
+    if (likely) return clean(likely.replace(/[^\d,.]/g, ""));
+    const numeric = values.filter((value) => /^\d[\d,.]*$/.test(value));
+    return numeric[numeric.length - 1] || "";
+  };
+  const rowValues = (row) => {
+    const cells = Array.from(row.querySelectorAll("[role='cell'], td, th, [data-label]")).filter(visible);
+    const values = (cells.length ? cells : Array.from(row.children || []).filter(visible))
+      .map(cellText)
+      .filter(Boolean);
+    return Array.from(new Set(values));
+  };
+  const rowCandidates = Array.from(document.querySelectorAll("tbody tr, [role='row'], [data-rowid], .nJ0sOc, .ptEsvc, .SmR8"))
+    .filter(visible);
+  const rows = rowCandidates
     .map((row, index) => {
-      const issue = cellText(row, "issue", 1);
+      const values = rowValues(row);
+      const text = clean(values.join(" ") || row.innerText || row.textContent || "");
+      const issue = findIssue(text);
       if (!issue || !/issue|问题|inp|lcp|cls/i.test(issue)) return null;
       return {
         rowIndex: Number(row.getAttribute("data-rowid") || index),
-        severity: cellText(row, "severity", 0),
+        severity: row.querySelector('[data-label="severity"]') ? cellText(row.querySelector('[data-label="severity"]')) : findSeverity(text) || values[0] || "",
         issue,
-        validation: cellText(row, "task_status", 2),
-        urls: cellText(row, "URLs", 4) || cellText(row, "urls", 4)
+        validation: row.querySelector('[data-label="task_status"]') ? cellText(row.querySelector('[data-label="task_status"]')) : findValidation(text),
+        urls: row.querySelector('[data-label="URLs"], [data-label="urls"]') ? cellText(row.querySelector('[data-label="URLs"], [data-label="urls"]')) : findUrls(values, text),
+        values,
+        evidence: text.slice(0, 500)
       };
     })
     .filter(Boolean);
-  return { ok: rows.length > 0, rows, url: location.href, error: rows.length ? "" : "No issue rows found" };
+
+  if (!rows.length) {
+    const lines = (document.body?.innerText || "").split(/\n+/).map(clean).filter(Boolean);
+    lines.forEach((line, index) => {
+      const issue = findIssue(line);
+      if (!issue) return;
+      const context = clean(lines.slice(Math.max(0, index - 2), index + 5).join(" "));
+      rows.push({
+        rowIndex: index,
+        severity: findSeverity(context),
+        issue,
+        validation: findValidation(context),
+        urls: findUrls([], context),
+        values: [context],
+        evidence: context.slice(0, 500),
+        source: "text-fallback"
+      });
+    });
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  for (const row of rows) {
+    const key = `${row.issue}|${row.severity}|${row.urls}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(row);
+  }
+
+  const extractTable = (table, index) => {
+    const headers = Array.from(table.querySelectorAll("thead th, tr th"))
+      .map((th) => clean(th.innerText || th.textContent || th.getAttribute("data-name") || th.getAttribute("data-label")))
+      .filter(Boolean)
+      .slice(0, 12);
+    const tableRows = Array.from(table.querySelectorAll("tbody tr, [role='row']"))
+      .map((row) => Array.from(row.querySelectorAll("[role='cell'], td, th, [data-label]")).map(cellText).filter(Boolean))
+      .filter((row) => row.length)
+      .slice(0, 80);
+    return { caption: `Table ${index + 1}`, headers, rows: tableRows };
+  };
+  const visibleRows = rowCandidates
+    .map((row) => clean(row.innerText || row.textContent || ""))
+    .filter((text) => text && text.length >= 8 && text.length <= 900 && /issue|问题|good|poor|url|pages?|validation|inp|lcp|cls|网址|页面|较差|良好/i.test(text))
+    .slice(0, 80);
+  const cards = Array.from(document.querySelectorAll(".VfPpkd-WsjYwc, .KC1dQ, section, c-wiz, [role='dialog']"))
+    .filter(visible)
+    .map((el) => clean(el.innerText || el.textContent || ""))
+    .filter((text) => text && text.length >= 20 && text.length <= 1200 && /core web vitals|issue|inp|lcp|cls|good|poor|needs improvement|网址核心指标|问题|较差|需要改进/i.test(text))
+    .slice(0, 30);
+  const headings = Array.from(document.querySelectorAll("[role='heading'], h1, h2, h3"))
+    .map((heading) => clean(heading.innerText || heading.textContent || ""))
+    .filter(Boolean)
+    .slice(0, 40);
+  const snapshot = {
+    url: location.href,
+    headings,
+    visibleRows,
+    cards,
+    tables: Array.from(document.querySelectorAll("table")).map(extractTable).filter((table) => table.rows.length).slice(0, 8),
+    textSnapshot: (document.body?.innerText || "").slice(0, 8000)
+  };
+  return { ok: deduped.length > 0, rows: deduped, snapshot, url: location.href, error: deduped.length ? "" : "No issue rows found; exported DOM/text snapshot for fallback analysis" };
 }
 
 function pageClickCwvIssueRow(issueText, rowIndex) {
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
-  const rows = Array.from(document.querySelectorAll("tbody tr"));
+  const rows = Array.from(document.querySelectorAll("tbody tr, [role='row'], [data-rowid], .nJ0sOc, .ptEsvc, .SmR8")).filter(visible);
   const wanted = clean(issueText).toLowerCase();
   let row = rows.find((candidate) => {
     const issueCell = candidate.querySelector('[data-label="issue"]');
-    const text = clean(issueCell?.getAttribute("data-string-value") || issueCell?.innerText || "");
-    return text && text.toLowerCase() === wanted;
+    const text = clean(issueCell?.getAttribute("data-string-value") || issueCell?.innerText || candidate.innerText || candidate.textContent || "");
+    return text && (text.toLowerCase() === wanted || text.toLowerCase().includes(wanted));
   });
   if (!row) {
     row = rows.find((candidate, index) => Number(candidate.getAttribute("data-rowid") || index) === Number(rowIndex));
@@ -2004,6 +2160,8 @@ function buildPageMarkdown(page) {
   const headings = extracted.headings || [];
   const discovered = extracted.discoveredReports || [];
   const tables = extracted.tables || [];
+  const cards = extracted.cards || [];
+  const visibleRows = extracted.visibleRows || [];
   const lines = [
     `# ${page.title}`,
     "",
@@ -2042,6 +2200,12 @@ function buildPageMarkdown(page) {
     }
   }
 
+  if (cards.length || visibleRows.length) {
+    lines.push("## DOM Fallback Evidence", "");
+    const snippets = visibleRows.length ? visibleRows : cards;
+    lines.push("```text", snippets.slice(0, 24).map((row) => Array.isArray(row) ? row.join(" | ") : row).join("\n---\n"), "```", "");
+  }
+
   lines.push("## Text snapshot", "", "```text", (extracted.textSnapshot || "").slice(0, 4000), "```", "");
   return lines.join("\n");
 }
@@ -2061,6 +2225,23 @@ function buildCoreWebVitalsMarkdown(report) {
     if (device.issueScreenshot) lines.push(`Issue screenshot: ./${device.issueScreenshot.split("/").pop()}`, "");
     if (device.errors?.length) {
       lines.push("Errors:", ...device.errors.map((error) => `- ${error}`), "");
+    }
+    if (device.headings?.length || device.visibleRows?.length || device.cards?.length) {
+      lines.push("### DOM/Text Fallback Evidence", "");
+      if (device.headings?.length) {
+        lines.push("Headings:", ...device.headings.slice(0, 12).map((item) => `- ${item}`), "");
+      }
+      if (device.visibleRows?.length) {
+        lines.push("Visible rows/cards likely related to CWV:", "");
+        lines.push("```text");
+        lines.push(device.visibleRows.slice(0, 16).join("\n---\n"));
+        lines.push("```", "");
+      } else if (device.cards?.length) {
+        lines.push("Visible cards likely related to CWV:", "");
+        lines.push("```text");
+        lines.push(device.cards.slice(0, 10).join("\n---\n"));
+        lines.push("```", "");
+      }
     }
 
     lines.push("| Severity | Issue | Validation | URLs | URL Groups |");
@@ -2219,6 +2400,8 @@ function slimGscReportJobForAi(job) {
         headers: table.headers || [],
         rows: slimRows(table.rows, 30)
       })),
+      cards: (page.cards || []).slice(0, 20),
+      visibleRows: (page.visibleRows || []).slice(0, 30),
       discoveredReports: (page.discoveredReports || []).slice(0, 30),
       error: page.error || "",
       screenshots: pageScreenshotFiles(page).map(reportFileName),
@@ -2234,7 +2417,10 @@ function slimGscReportJobForAi(job) {
             urls: issue.urls,
             urlGroups: slimRows(issue.urlGroups, 25)
           })),
-          errors: device.errors || []
+          errors: device.errors || [],
+          headings: (device.headings || []).slice(0, 20),
+          visibleRows: (device.visibleRows || []).slice(0, 30),
+          cards: (device.cards || []).slice(0, 12)
         }))
       } : null,
       pageIndexing: page.indexing ? {
@@ -2363,6 +2549,21 @@ function renderReportFiles(files) {
   host.innerHTML = (files || []).map((f) => `<div>${escapeHtml(f)}</div>`).join("") || "—";
 }
 
+function setReportProgress(current, total, label = "") {
+  const root = document.getElementById("gscReportProgress");
+  if (!root) return;
+  const bar = document.getElementById("gscReportProgressBar");
+  const labelEl = document.getElementById("gscReportProgressLabel");
+  const countEl = document.getElementById("gscReportProgressCount");
+  const safeTotal = Math.max(1, Number(total) || 1);
+  const safeCurrent = Math.max(0, Math.min(Number(current) || 0, safeTotal));
+  const percent = Math.max(0, Math.min(100, Math.round((safeCurrent / safeTotal) * 100)));
+  root.hidden = false;
+  if (bar) bar.style.width = `${percent}%`;
+  if (labelEl) labelEl.textContent = label || "正在抓取 GSC 报告…";
+  if (countEl) countEl.textContent = `${safeCurrent}/${safeTotal} · ${percent}%`;
+}
+
 function formatSubmitStatus(job) {
   const ok = (job.results || []).filter((x) => x.status === "success").length;
   const failed = (job.results || []).filter((x) => x.status === "failed").length;
@@ -2450,11 +2651,11 @@ function reportTypeFromUrl(url) {
 
 function formatLocalTimestamp(date) {
   const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
 }
 
 function buildGscReportFolderName(date) {
-  return `${GSC_REPORT_DOWNLOAD_ROOT}/${formatLocalTimestamp(date)}`;
+  return `${GSC_REPORT_DOWNLOAD_ROOT}-${formatLocalTimestamp(date)}`;
 }
 
 function decodeHtml(text) {
