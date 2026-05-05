@@ -47,7 +47,7 @@ Side Panel 底部新增 **GSC Operator**：
 - **全页截图**：报告截图使用 Chrome 调试协议临时设置较宽的页面截图视口并抓取全页，避免 Side Panel 占用右侧宽度导致 GSC 图表或表格被截窄；调试协议不可用时会自动回退到当前可见页签截图。
 - **Core Web Vitals 下钻**：遇到 Core Web Vitals summary 页面时，会复用当前页签依次打开 Mobile / Desktop 的 Open report，抓取 “Why URLs aren't considered good” 问题表，并逐行点击原因进入 URL groups 明细表导出。
 - **Page Indexing 下钻**：遇到 Page Indexing 页面时，会抓取 “Why pages aren’t indexed” 原因表，并逐行点击原因进入 drilldown，导出 Examples URL / Last crawled 明细。
-- **Performance Insights 下钻**：遇到 Performance Insights 页面时，会抓取 LAST28DAYS 的 Top / Trending up / Trending down，以及 LAST7DAYS 的 Trending down 页面明细，并导出最近 7 天下降页的 Search Analytics page breakdown。
+- **Performance Insights 下钻**：遇到 Performance Insights 页面时，会先抓取 `Queries leading to your site` 的 Top / Trending up / Trending down 查询组和 Clicks，再抓取 Content 的 LAST28DAYS Top / Trending up / Trending down，以及 LAST7DAYS Trending down 页面明细，并导出最近 7 天下降页的 Search Analytics page breakdown。
 - **通用报告抽取**：对 Discover、Links、Sitemaps、HTTPS、Videos、富结果等未定制下钻的报告，Lily 会抽取关键指标、真实 table、虚拟 DOM 行、卡片文本、文本快照和页面内发现的 GSC 报告链接，写入单页 Markdown 和总索引。
 - **交付文件**：每次 Capture Reports 会生成 `gsc-report-index.md` 总目录、各报告明细 `.md`、结构化 `.json`、截图 `.png`，全部放在同一个 `Downloads/lily-gsc-reports-yyyy-mm-dd-hh-mm-ss/` 目录。所有图片、Markdown 和 JSON 文件都使用报告类型、设备、原因、Tab 等语义化文件名；下载由 background 强制指定文件名，避免 Chrome 把截图落成 `download.png`。`gsc-report-index.md` 会链接全部截图、明细数据文件、默认种子报告和递归发现报告，方便直接反馈给团队。
 - **AI 摘要**：Chrome 扩展不能直接启动本地 Node/Next.js 进程；源码里会在 Chrome 启动 / 设置保存时探测 `aiServerUrl` 的 `/api/health`。如果 Settings 中启用了 AI 且服务可用，GSC 报告会额外调用 AI Server 生成优先级摘要并写入 `gsc-report-index.md`。AI Server 可以本地运行，也可以部署到 Vercel 后把 URL 填进 Settings。

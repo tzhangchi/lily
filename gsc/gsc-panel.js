@@ -600,7 +600,7 @@ async function runReportCaptureJob() {
   if (!urls.length) return setReportStatus("请先在当前页签打开 GSC 报告页，或粘贴要在当前页签中抓取的报告 URL");
   if (!inputUrls.length && !isSearchConsoleUrl(currentUrl)) return setReportStatus("当前页签不是 GSC 报告页，请先打开正确的 Search Console 页面");
 
-  const seedSourceUrl = [currentUrl, ...urls].find((candidate) => isGscOverviewUrl(candidate));
+  const seedSourceUrl = [currentUrl, ...urls].find((candidate) => isSearchConsoleUrl(candidate));
   const seedReports = recursiveDiscovery && seedSourceUrl ? buildGscSeedReportUrls(seedSourceUrl) : [];
   const queueUrls = uniqueStrings([...urls, ...seedReports.map((seed) => alignGoogleAccountPath(seed.url, currentUrl))]).slice(0, maxPages);
 
@@ -1057,21 +1057,48 @@ async function capturePerformanceInsightsDrilldown(tabId, startUrl, folder, inde
   for (const target of config.targets) {
     if (reportController.stopped) break;
     setReportStatus(`Insights: 抓取 ${target.label}`);
-    await navigateReportTab(tabId, target.contentUrl);
-    const ready = await waitForPageCondition(tabId, pageHasPerformanceInsightsContent, [], 25000);
+    await navigateReportTab(tabId, target.url || target.contentUrl);
+    const ready = target.insightType === "queries"
+      ? await waitForPageCondition(tabId, pageHasPerformanceInsightsQueriesContent, [], 25000)
+      : await waitForPageCondition(tabId, pageHasPerformanceInsightsContent, [], 25000);
     const targetResult = {
       label: target.label,
       timeRange: target.timeRange,
+      insightType: target.insightType,
       contentTab: target.contentTab,
+      queryTab: target.queryTab,
+      queryTabLabel: target.queryTabLabel,
+      url: target.url,
       contentUrl: target.contentUrl,
       searchAnalyticsUrl: target.searchAnalyticsUrl,
       rows: [],
+      queryRows: [],
       searchAnalyticsRows: [],
       errors: []
     };
     result.targets.push(targetResult);
     if (!ready?.ok) {
       targetResult.errors.push(ready?.error || "Performance Insights content did not load");
+      continue;
+    }
+
+    if (target.insightType === "queries") {
+      const clicked = await runInTab(tabId, pageClickPerformanceInsightsQueryTab, [target.queryTabLabel]);
+      if (!clicked?.ok) targetResult.errors.push(clicked?.error || `Query tab not found: ${target.queryTabLabel}`);
+      await sleep(900);
+      await runInTab(tabId, pageScrollToPerformanceInsightsQueries, []);
+      await sleep(500);
+      const extracted = await runInTab(tabId, pageExtractPerformanceInsightsQueries, [target]);
+      targetResult.queryRows = extracted?.rows || [];
+      targetResult.pageTitle = extracted?.title || "";
+      targetResult.activeTab = extracted?.activeTab || target.queryTabLabel || "";
+      targetResult.rawText = extracted?.rawText || "";
+      if (!targetResult.queryRows.length) targetResult.errors.push(extracted?.error || "No query insight rows found");
+
+      const screenshotPath = `${folder}/${slugBase}-${safeSlug(target.label)}.png`;
+      await downloadDataUrlFile(screenshotPath, await captureReportScreenshot(tabId));
+      files.push(screenshotPath);
+      targetResult.screenshot = screenshotPath;
       continue;
     }
 
@@ -1116,10 +1143,16 @@ async function capturePerformanceInsightsDrilldown(tabId, startUrl, folder, inde
   await downloadTextFile(jsonPath, JSON.stringify(result, null, 2), "application/json;charset=utf-8");
   files.push(mdPath, jsonPath);
 
-  const metrics = result.targets.flatMap((target) => (target.rows || []).map((row) => {
-    const change = [row.direction, row.changePercent, row.clickDelta || row.clicks].filter(Boolean).join(" ");
-    return `${target.label}: ${row.title || row.url} ${change}`.trim();
-  })).slice(0, 80);
+  const metrics = result.targets.flatMap((target) => [
+    ...(target.queryRows || []).map((row) => {
+      const change = [row.direction, row.changePercent, row.clicks].filter(Boolean).join(" ");
+      return `${target.label}: ${row.query} ${change}`.trim();
+    }),
+    ...(target.rows || []).map((row) => {
+      const change = [row.direction, row.changePercent, row.clickDelta || row.clicks].filter(Boolean).join(" ");
+      return `${target.label}: ${row.title || row.url} ${change}`.trim();
+    })
+  ]).slice(0, 120);
 
   return {
     url: startUrl,
@@ -1140,6 +1173,11 @@ function buildPerformanceInsightsTargets(startUrl) {
   const basePath = `${accountPrefix}search-console`;
   const resourceId = start.searchParams.get("resource_id") || DEFAULT_PROPERTY;
   const origin = `${start.origin}${basePath}`;
+  const makeInsightsUrl = () => {
+    const url = new URL(`${origin}/performance/insights`);
+    url.searchParams.set("resource_id", resourceId);
+    return url.toString();
+  };
   const makeContentUrl = (timeRange, contentTab) => {
     const url = new URL(`${origin}/performance/insights/content`);
     url.searchParams.set("resource_id", resourceId);
@@ -1159,16 +1197,23 @@ function buildPerformanceInsightsTargets(startUrl) {
     url.hash = "dimension-tables";
     return url.toString();
   };
-  const targets = [
-    { label: "Last 28 days - Top", timeRange: "LAST28DAYS", contentTab: "TOP" },
-    { label: "Last 28 days - Trending up", timeRange: "LAST28DAYS", contentTab: "TRENDING_UP" },
-    { label: "Last 28 days - Trending down", timeRange: "LAST28DAYS", contentTab: "TRENDING_DOWN" },
-    { label: "Last 7 days - Trending down", timeRange: "LAST7DAYS", contentTab: "TRENDING_DOWN", includeSearchAnalytics: true }
+  const queryTargets = [
+    { label: "Queries - Top", insightType: "queries", queryTab: "TOP", queryTabLabel: "Top" },
+    { label: "Queries - Trending up", insightType: "queries", queryTab: "TRENDING_UP", queryTabLabel: "Trending up" },
+    { label: "Queries - Trending down", insightType: "queries", queryTab: "TRENDING_DOWN", queryTabLabel: "Trending down" }
+  ].map((target) => ({ ...target, url: makeInsightsUrl() }));
+  const contentTargets = [
+    { label: "Content - Last 28 days - Top", insightType: "content", timeRange: "LAST28DAYS", contentTab: "TOP" },
+    { label: "Content - Last 28 days - Trending up", insightType: "content", timeRange: "LAST28DAYS", contentTab: "TRENDING_UP" },
+    { label: "Content - Last 28 days - Trending down", insightType: "content", timeRange: "LAST28DAYS", contentTab: "TRENDING_DOWN" },
+    { label: "Content - Last 7 days - Trending down", insightType: "content", timeRange: "LAST7DAYS", contentTab: "TRENDING_DOWN", includeSearchAnalytics: true }
   ].map((target) => ({
     ...target,
+    url: makeContentUrl(target.timeRange, target.contentTab),
     contentUrl: makeContentUrl(target.timeRange, target.contentTab),
     searchAnalyticsUrl: makeSearchAnalyticsUrl(target.timeRange, target.contentTab)
   }));
+  const targets = [...queryTargets, ...contentTargets];
   return { resourceId, targets };
 }
 
@@ -2019,12 +2064,120 @@ function pageHasPerformanceInsightsContent() {
   return { ok, url: location.href, error: ok ? "" : "Performance Insights content not found" };
 }
 
+function pageHasPerformanceInsightsQueriesContent() {
+  const text = document.body?.innerText || "";
+  const ok = /queries leading to your site|query|queries|热门查询|查询/i.test(text) && /top|trending up|trending down|clicks|点击/i.test(text);
+  return { ok, url: location.href, error: ok ? "" : "Performance Insights query section not found" };
+}
+
 function pageScrollToPerformanceInsightsContent() {
   const candidates = Array.from(document.querySelectorAll("h1,h2,h3,div,section"));
   const section = candidates.find((el) => /your content/i.test(el.innerText || el.textContent || ""))
     || candidates.find((el) => /https?:\/\//i.test(el.innerText || el.textContent || ""));
   if (section) section.scrollIntoView({ block: "start", inline: "nearest" });
   return { ok: !!section };
+}
+
+function pageScrollToPerformanceInsightsQueries() {
+  const candidates = Array.from(document.querySelectorAll("h1,h2,h3,div,section,c-wiz"));
+  const section = candidates.find((el) => /queries leading to your site/i.test(el.innerText || el.textContent || ""))
+    || candidates.find((el) => /trending up/i.test(el.innerText || el.textContent || "") && /trending down/i.test(el.innerText || el.textContent || "") && /clicks/i.test(el.innerText || el.textContent || ""));
+  if (section) section.scrollIntoView({ block: "start", inline: "nearest" });
+  return { ok: !!section };
+}
+
+function pageClickPerformanceInsightsQueryTab(label) {
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const norm = (value) => clean(value).toLowerCase();
+  const wanted = norm(label);
+  const exact = (value) => norm(value) === wanted;
+  const candidates = Array.from(document.querySelectorAll('[role="tab"], button, a, [role="button"], div[tabindex], span[tabindex]'))
+    .filter(visible)
+    .map((el) => ({ el, text: clean(el.innerText || el.textContent || el.getAttribute("aria-label") || el.getAttribute("title") || "") }))
+    .filter((item) => item.text && item.text.length <= 80);
+  let item = candidates.find((candidate) => exact(candidate.text));
+  if (!item && wanted === "top") item = candidates.find((candidate) => /^top$/i.test(candidate.text));
+  if (!item && wanted.includes("trending up")) item = candidates.find((candidate) => /trending up/i.test(candidate.text));
+  if (!item && wanted.includes("trending down")) item = candidates.find((candidate) => /trending down/i.test(candidate.text));
+  if (!item) return { ok: false, error: `Insights query tab not found: ${label}` };
+  item.el.scrollIntoView({ block: "center", inline: "center" });
+  item.el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+  item.el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+  item.el.click();
+  return { ok: true, tab: label, text: item.text };
+}
+
+function pageExtractPerformanceInsightsQueries(target) {
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const activeTab = Array.from(document.querySelectorAll('[aria-selected="true"], [role="tab"], button, a'))
+    .map((el) => clean(el.innerText || el.textContent || el.getAttribute("aria-label") || ""))
+    .find((label) => /top|trending up|trending down/i.test(label)) || target?.queryTabLabel || "";
+  const directionForTarget = () => target?.queryTab === "TRENDING_DOWN" ? "down" : (target?.queryTab === "TRENDING_UP" ? "up" : "");
+  const cleanClick = (value) => clean(value).replace(/\s+/g, "");
+  const parseLines = (rawLines, orderBase = 0) => {
+    const rows = [];
+    const lines = (rawLines || []).map(clean).filter(Boolean);
+    for (let i = 0; i < lines.length; i++) {
+      const arrow = lines[i];
+      if (!/^arrow_(upward|downward)$/i.test(arrow) && !/^[↑↓]$/.test(arrow)) continue;
+      const query = lines[i - 2] || "";
+      const similar = lines[i - 1] || "";
+      const change = lines[i + 1] || "";
+      const clicks = lines[i + 2] || "";
+      if (!query || /queries leading|top|trending|clicks|similar queries|help/i.test(query)) continue;
+      if (!/%$/.test(change) || !/^-?\d[\d,.KMkm]*$/.test(cleanClick(clicks))) continue;
+      rows.push({
+        order: orderBase + i,
+        query,
+        similarQueries: similar.split(/\s*,\s*/).map(clean).filter(Boolean).slice(0, 80),
+        direction: /downward|↓/i.test(arrow) ? "down" : "up",
+        changePercent: change,
+        clicks: cleanClick(clicks),
+        text: [query, similar, arrow, change, clicks].join("\n")
+      });
+    }
+    return rows;
+  };
+  const cards = Array.from(document.querySelectorAll(".VfPpkd-WsjYwc, .KC1dQ, section, c-wiz, [role='row'], [data-rowid], li, div"))
+    .filter(visible)
+    .map((el, index) => ({ index, text: (el.innerText || el.textContent || "").trim() }))
+    .filter((item) => item.text && item.text.length >= 20 && item.text.length <= 6000 && /arrow_(upward|downward)|↑|↓/.test(item.text) && /%/.test(item.text));
+  const byQuery = new Map();
+  for (const card of cards) {
+    const parsed = parseLines(card.text.split(/\n+/), card.index * 100);
+    for (const row of parsed) {
+      if (!byQuery.has(row.query)) byQuery.set(row.query, row);
+    }
+  }
+
+  if (!byQuery.size) {
+    const bodyLines = (document.body?.innerText || "").split(/\n+/).map(clean).filter(Boolean);
+    let start = bodyLines.findIndex((line) => /queries leading to your site/i.test(line));
+    if (start < 0) start = bodyLines.findIndex((line, index) => /^top$/i.test(line) && /trending up/i.test(bodyLines.slice(index, index + 4).join(" ")));
+    const end = bodyLines.findIndex((line, index) => index > start && /is this insight helpful/i.test(line));
+    const scoped = bodyLines.slice(Math.max(0, start), end > start ? end : bodyLines.length);
+    for (const row of parseLines(scoped, 0)) {
+      if (!byQuery.has(row.query)) byQuery.set(row.query, row);
+    }
+  }
+
+  const wantedDirection = directionForTarget();
+  const rows = Array.from(byQuery.values())
+    .filter((row) => !wantedDirection || row.direction === wantedDirection || target?.queryTab === "TOP")
+    .sort((a, b) => a.order - b.order)
+    .slice(0, 80)
+    .map(({ order, ...row }) => row);
+  return {
+    ok: rows.length > 0,
+    url: location.href,
+    title: "Queries leading to your site",
+    activeTab,
+    rows,
+    rawText: (document.body?.innerText || "").slice(0, 8000),
+    error: rows.length ? "" : "No Performance Insights query rows found"
+  };
 }
 
 function pageExtractPerformanceInsightsContent(target) {
@@ -2337,12 +2490,23 @@ function buildPerformanceInsightsMarkdown(report) {
 
   for (const target of report.targets || []) {
     lines.push(`## ${target.label}`, "");
-    lines.push(`Content URL: ${target.contentUrl}`);
+    if (target.url) lines.push(`Insights URL: ${target.url}`);
+    if (target.contentUrl) lines.push(`Content URL: ${target.contentUrl}`);
     if (target.searchAnalyticsUrl) lines.push(`Search Analytics URL: ${target.searchAnalyticsUrl}`);
     if (target.screenshot) lines.push(`Screenshot: ./${target.screenshot.split("/").pop()}`);
     if (target.activeTab) lines.push(`Active tab: ${target.activeTab}`);
     if (target.errors?.length) lines.push("Errors:", ...target.errors.map((error) => `- ${error}`));
     lines.push("");
+
+    if (target.queryRows?.length) {
+      lines.push("### Queries Leading To Your Site", "");
+      lines.push("| Query | Similar query group | Direction | Change | Clicks |");
+      lines.push("|---|---|---|---:|---:|");
+      for (const row of target.queryRows || []) {
+        lines.push(`| ${escapeTable(row.query)} | ${escapeTable((row.similarQueries || []).slice(0, 16).join(", "))} | ${escapeTable(row.direction)} | ${escapeTable(row.changePercent)} | ${escapeTable(row.clicks)} |`);
+      }
+      lines.push("");
+    }
 
     lines.push("| Title | URL | Direction | Change | Click Delta | Clicks |");
     lines.push("|---|---|---|---:|---:|---:|");
@@ -2437,6 +2601,8 @@ function slimGscReportJobForAi(job) {
       performanceInsights: page.performanceInsights ? {
         targets: (page.performanceInsights.targets || []).map((target) => ({
           label: target.label,
+          insightType: target.insightType,
+          queryRows: slimRows(target.queryRows, 40),
           rows: slimRows(target.rows, 40),
           searchAnalyticsRows: slimRows(target.searchAnalyticsRows, 40),
           errors: target.errors || []
