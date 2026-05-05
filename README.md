@@ -40,6 +40,7 @@ Popup 的 Save Tab 点击 **Settings**，配置：
 
 Side Panel 底部新增 **GSC Operator**：
 
+- **源码版本提示**：GSC Operator 卡片顶部会显示 `Source updated` 和扩展版本号。重新加载插件后可以用它确认当前浏览器跑的是不是最新源码。
 - **自动提交 URL Inspection**：粘贴 sitemap URL、sitemap XML 或 URL 列表，Lily 会解析并逐个在 Google Search Console 中请求编入索引。
 - **抓取核心报告**：请先在当前页签打开正确账号 / Property 的 GSC 报告页；Lily 基于当前页签抓取 Markdown + PNG 截图，不会新开页签。需要抓取多个报告时，可在 Report URLs 多个输入框中分别配置 URL，Lily 会复用当前页签依次跳转。每次抓取会按 `YYYY-MM-DD_HH-mm-ss` 创建独立目录。
 - **递归发现 SEO/Growth 报告**：从 GSC Overview 开始时，Lily 会自动补充并递归发现 Search results、Discover、Pages、Videos、Sitemaps、Core Web Vitals、HTTPS、Product snippets、Merchant listings、Breadcrumbs、FAQ、Review snippets、AMP、Links、Manual actions、Security issues 等对 SEO 和商业增长重要的导航、卡片和详情报告。
@@ -48,7 +49,7 @@ Side Panel 底部新增 **GSC Operator**：
 - **Page Indexing 下钻**：遇到 Page Indexing 页面时，会抓取 “Why pages aren’t indexed” 原因表，并逐行点击原因进入 drilldown，导出 Examples URL / Last crawled 明细。
 - **Performance Insights 下钻**：遇到 Performance Insights 页面时，会抓取 LAST28DAYS 的 Top / Trending up / Trending down，以及 LAST7DAYS 的 Trending down 页面明细，并导出最近 7 天下降页的 Search Analytics page breakdown。
 - **通用报告抽取**：对 Discover、Links、Sitemaps、HTTPS、Videos、富结果等未定制下钻的报告，Lily 会抽取关键指标、可见表格、文本快照和页面内发现的 GSC 报告链接，写入单页 Markdown 和总索引。
-- **交付文件**：每次 Capture Reports 会生成 `gsc-report-index.md` 总目录、各报告明细 `.md`、结构化 `.json`、截图 `.png`，全部放在同一个 `Downloads/lily-gsc-reports/YYYY-MM-DD_HH-mm-ss/` 目录。所有图片、Markdown 和 JSON 文件都使用报告类型、设备、原因、Tab 等语义化文件名；`gsc-report-index.md` 会链接全部截图、明细数据文件、默认种子报告和递归发现报告，方便直接反馈给团队。
+- **交付文件**：每次 Capture Reports 会生成 `gsc-report-index.md` 总目录、各报告明细 `.md`、结构化 `.json`、截图 `.png`，全部放在同一个 `Downloads/lily-gsc-reports/YYYY-MM-DD_HH-mm-ss/` 目录。所有图片、Markdown 和 JSON 文件都使用报告类型、设备、原因、Tab 等语义化文件名；下载由 background 强制指定文件名，避免 Chrome 把截图落成 `download.png`。`gsc-report-index.md` 会链接全部截图、明细数据文件、默认种子报告和递归发现报告，方便直接反馈给团队。
 - **AI 摘要**：Chrome 扩展不能直接启动本地 Node/Next.js 进程；源码里会在 Chrome 启动 / 设置保存时探测 `aiServerUrl` 的 `/api/health`。如果 Settings 中启用了 AI 且服务可用，GSC 报告会额外调用 AI Server 生成优先级摘要并写入 `gsc-report-index.md`。AI Server 可以本地运行，也可以部署到 Vercel 后把 URL 填进 Settings。
 - 报告默认下载到：`Downloads/lily-gsc-reports/YYYY-MM-DD_HH-mm-ss/`
 

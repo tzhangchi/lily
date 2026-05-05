@@ -10,6 +10,7 @@ const DEFAULT_REPORT_FIELD_COUNT = 3;
 const REPORT_URL_PLACEHOLDER = "留空则抓取当前已打开的 GSC 报告页";
 const GSC_REPORT_DOWNLOAD_ROOT = "lily-gsc-reports";
 const GSC_REPORT_DOWNLOAD_DISPLAY_ROOT = `Downloads/${GSC_REPORT_DOWNLOAD_ROOT}`;
+const GSC_OPERATOR_SOURCE_UPDATED_AT = "2026-05-06 02:05 Asia/Shanghai";
 
 const REQUEST_INDEXING_TEXTS = ["Request indexing", "请求编入索引"];
 const CLOSE_TEXTS = ["Got it", "Close", "关闭", "完成"];
@@ -32,6 +33,7 @@ function renderGscUi() {
   return `
     <div class="card">
       <h3>Lily GSC Operator</h3>
+      <div class="small muted">Source updated: ${GSC_OPERATOR_SOURCE_UPDATED_AT} · Extension v${chrome.runtime.getManifest().version}</div>
       <div class="muted">
         自动辅助 Google Search Console URL Inspection 提交索引请求，并抓取核心报告 Markdown + 截图 + JSON 明细。
         插件不会绕过 Google 登录，也不保证收录；请保持低频使用，避免触发 GSC 配额。
@@ -2312,11 +2314,22 @@ function pageScreenshotFiles(page) {
 
 async function downloadTextFile(filename, content, mimeType = "text/plain;charset=utf-8") {
   const url = `data:${mimeType},${encodeURIComponent(content)}`;
-  return chrome.downloads.download({ url, filename: normalizeDownloadFilename(filename), saveAs: false });
+  return downloadNamedDataUrlFile(filename, url);
 }
 
 async function downloadDataUrlFile(filename, dataUrl) {
-  return chrome.downloads.download({ url: dataUrl, filename: normalizeDownloadFilename(filename), saveAs: false });
+  return downloadNamedDataUrlFile(filename, dataUrl);
+}
+
+async function downloadNamedDataUrlFile(filename, dataUrl) {
+  const normalized = normalizeDownloadFilename(filename);
+  const response = await chrome.runtime.sendMessage({
+    type: "LR_DOWNLOAD_NAMED_DATA_URL",
+    filename: normalized,
+    dataUrl
+  });
+  if (!response?.ok) throw new Error(response?.error || `Download failed: ${normalized}`);
+  return response.downloadId;
 }
 
 function normalizeDownloadFilename(filename) {

@@ -7,6 +7,19 @@ const STORAGE_KEYS = {
   aiStatus: "lr_ai_server_status"
 };
 
+const pendingForcedDownloadNames = new Map();
+
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  const token = extractForcedDownloadToken(item.url || "");
+  const filename = token ? pendingForcedDownloadNames.get(token) : "";
+  if (!filename) {
+    suggest();
+    return;
+  }
+  pendingForcedDownloadNames.delete(token);
+  suggest({ filename, conflictAction: "uniquify" });
+});
+
 async function getSettings() {
   const { [STORAGE_KEYS.settings]: settings } = await chrome.storage.sync.get(STORAGE_KEYS.settings);
   return { ...DEFAULT_SETTINGS, ...(settings || {}) };
@@ -91,6 +104,46 @@ async function downloadCsv(filename, rows) {
 async function downloadTextFile(filename, content, mimeType = "text/plain;charset=utf-8") {
   const url = `data:${mimeType},${encodeURIComponent(content)}`;
   return chrome.downloads.download({ url, filename, saveAs: false });
+}
+
+async function downloadNamedDataUrl(filename, dataUrl) {
+  const normalized = normalizeDownloadFilename(filename);
+  if (!normalized) throw new Error("download filename is empty");
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const taggedUrl = tagDataUrlForDownload(dataUrl, token);
+  pendingForcedDownloadNames.set(token, normalized);
+  try {
+    return await chrome.downloads.download({
+      url: taggedUrl,
+      filename: normalized,
+      saveAs: false,
+      conflictAction: "uniquify"
+    });
+  } catch (e) {
+    pendingForcedDownloadNames.delete(token);
+    throw e;
+  }
+}
+
+function tagDataUrlForDownload(dataUrl, token) {
+  const url = dataUrl || "";
+  if (!url.startsWith("data:")) return url;
+  const comma = url.indexOf(",");
+  if (comma < 0) return url;
+  return `${url.slice(0, comma)};lilyDownloadId=${encodeURIComponent(token)}${url.slice(comma)}`;
+}
+
+function extractForcedDownloadToken(url) {
+  const match = (url || "").match(/[;?&]lilyDownloadId=([^;,?#]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function normalizeDownloadFilename(filename) {
+  return (filename || "")
+    .replace(/^\/+/, "")
+    .replace(/^Downloads\//i, "")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 }
 
 function safeFilenamePart(value, fallback = "page") {
@@ -273,6 +326,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         const ai = await aiBuildGscReportInsights(msg.job || {}, settings);
         sendResponse({ ok: true, ai });
+        return;
+      }
+      if (msg?.type === "LR_DOWNLOAD_NAMED_DATA_URL") {
+        const downloadId = await downloadNamedDataUrl(msg.filename || "", msg.dataUrl || "");
+        sendResponse({ ok: true, downloadId, filename: normalizeDownloadFilename(msg.filename || "") });
         return;
       }
 
