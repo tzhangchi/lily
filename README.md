@@ -47,7 +47,7 @@ Side Panel 底部新增 **GSC Operator**：
 - **全页截图**：报告截图使用 Chrome 调试协议临时设置较宽的页面截图视口并抓取全页，避免 Side Panel 占用右侧宽度导致 GSC 图表或表格被截窄；调试协议不可用时会自动回退到当前可见页签截图。
 - **Core Web Vitals 下钻**：遇到 Core Web Vitals summary 页面时，会复用当前页签依次打开 Mobile / Desktop 的 Open report，抓取 “Why URLs aren't considered good” 问题表，并逐行点击原因进入 URL groups 明细表导出。
 - **Page Indexing 下钻**：遇到 Page Indexing 页面时，会抓取 “Why pages aren’t indexed” 原因表，并逐行点击原因进入 drilldown，导出 Examples URL / Last crawled 明细。
-- **Performance Insights 下钻**：遇到 Performance Insights 页面时，会先抓取 `Queries leading to your site` 的 Top / Trending up / Trending down 查询组和 Clicks，再抓取 Content 的 LAST28DAYS Top / Trending up / Trending down，以及 LAST7DAYS Trending down 页面明细，并导出最近 7 天下降页的 Search Analytics page breakdown。
+- **Performance Insights 下钻**：遇到 Performance Insights 页面时，会先抓取 `Queries leading to your site` 的 Top / Trending up / Trending down 查询组和 Clicks，再补抓 View More 中最明显下降 / 上升的关键词与页面 Search Analytics 明细，然后抓取 Content 的 LAST28DAYS Top / Trending up / Trending down，以及 LAST7DAYS Trending down 页面明细，并导出下降页的 Search Analytics page breakdown。
 - **Search results 下钻**：遇到 Search results / Search Analytics 页面时，会自动抓取 Queries、Pages、Countries、Devices、Search appearance、Dates 六个维度，帮助定位高展示低点击词、自然入口页、市场、设备和富结果表现。
 - **通用报告抽取**：对 Discover、Links、Sitemaps、HTTPS、Videos、富结果等未定制下钻的报告，Lily 会抽取关键指标、真实 table、虚拟 DOM 行、卡片文本、文本快照、问题信号、报告区块和本地行动建议，写入单页 Markdown 和总索引。
 - **本地行动计划**：即使 AI 摘要不可用，`gsc-report-index.md` 也会生成 SEO / Conversion / Page quality / Indexing / Structured data / Risk 的规则化行动计划和覆盖地图，便于直接分配修复任务。

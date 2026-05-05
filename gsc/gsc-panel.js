@@ -107,7 +107,7 @@ function renderGscUi() {
             <div class="gsc-option-list">
               <label class="gsc-option"><input id="gscCwvDrilldown" type="checkbox" checked /><span><strong>CWV 下钻</strong><small>抓取 Mobile / Desktop 问题原因和 URL groups。</small></span></label>
               <label class="gsc-option"><input id="gscIndexingDrilldown" type="checkbox" checked /><span><strong>Indexing 下钻</strong><small>抓取未索引原因和示例 URL。</small></span></label>
-              <label class="gsc-option"><input id="gscPerformanceDrilldown" type="checkbox" checked /><span><strong>Performance Insights</strong><small>抓取 Queries 的 Top / Trending up / Trending down，以及 Content 明细。</small></span></label>
+              <label class="gsc-option"><input id="gscPerformanceDrilldown" type="checkbox" checked /><span><strong>Performance Insights</strong><small>抓取 Queries、View More 下降/上升页与关键词，以及 Content 明细。</small></span></label>
               <label class="gsc-option"><input id="gscAiReportSummary" type="checkbox" checked /><span><strong>AI 摘要</strong><small>如果 Settings 已启用 AI 且服务可用，会写入优先级摘要。</small></span></label>
               <label class="gsc-option"><input id="gscRecursiveDiscovery" type="checkbox" checked /><span><strong>递归发现报告</strong><small>从任意 GSC 页补齐 Overview、Insights、Search results、Pages、富结果、Links 等核心报告。</small></span></label>
               <label class="gsc-option"><input id="gscIncludeDetails" type="checkbox" checked /><span><strong>包含详情页</strong><small>打开报告中的 Review issues / Open report 等详情链接。</small></span></label>
@@ -874,17 +874,22 @@ async function captureCoreWebVitalsDrilldown(tabId, startUrl, folder, index, dep
       if (reportController.stopped) break;
       const issue = device.issues[i];
       setReportStatus(`CWV ${deviceName}: 下钻 ${i + 1}/${device.issues.length} ${issue.issue}`);
-      await navigateReportTab(tabId, device.issueReportUrl);
-      const issueReady = await waitForPageCondition(tabId, pageHasCwvIssueTable, [], 20000);
-      if (!issueReady?.ok) {
-        issue.error = issueReady?.error || "Issue table did not reload";
-        continue;
-      }
+      if (issue.detailUrl) {
+        await navigateReportTab(tabId, issue.detailUrl);
+      } else {
+        await navigateReportTab(tabId, device.issueReportUrl);
+        const issueReady = await waitForPageCondition(tabId, pageHasCwvIssueTable, [], 20000);
+        if (!issueReady?.ok) {
+          issue.error = issueReady?.error || "Issue table did not reload";
+          continue;
+        }
 
-      const clicked = await runInTab(tabId, pageClickCwvIssueRow, [issue.issue, issue.rowIndex]);
-      if (!clicked?.ok) {
-        issue.error = clicked?.error || "Issue row click failed";
-        continue;
+        const clicked = await runInTab(tabId, pageClickCwvIssueRow, [issue.issue, issue.rowIndex, issue]);
+        if (!clicked?.ok) {
+          issue.error = clicked?.error || "Issue row click failed";
+          issue.clickDebug = clicked?.debug || [];
+          continue;
+        }
       }
 
       const ready = await waitForPageCondition(tabId, pageHasCwvUrlGroupsTable, [], 25000);
@@ -1222,9 +1227,6 @@ async function capturePerformanceInsightsDrilldown(tabId, startUrl, folder, inde
     if (reportController.stopped) break;
     setReportStatus(`Insights: 抓取 ${target.label}`);
     await navigateReportTab(tabId, target.url || target.contentUrl);
-    const ready = target.insightType === "queries"
-      ? await waitForPageCondition(tabId, pageHasPerformanceInsightsQueriesContent, [], 25000)
-      : await waitForPageCondition(tabId, pageHasPerformanceInsightsContent, [], 25000);
     const targetResult = {
       label: target.label,
       timeRange: target.timeRange,
@@ -1232,6 +1234,8 @@ async function capturePerformanceInsightsDrilldown(tabId, startUrl, folder, inde
       contentTab: target.contentTab,
       queryTab: target.queryTab,
       queryTabLabel: target.queryTabLabel,
+      breakdown: target.breakdown,
+      sortDirection: target.sortDirection,
       url: target.url,
       contentUrl: target.contentUrl,
       searchAnalyticsUrl: target.searchAnalyticsUrl,
@@ -1241,6 +1245,32 @@ async function capturePerformanceInsightsDrilldown(tabId, startUrl, folder, inde
       errors: []
     };
     result.targets.push(targetResult);
+
+    if (target.insightType === "search-analytics-view-more") {
+      const tableReady = await waitForPageCondition(tabId, pageHasPerformanceSearchAnalyticsTable, [], 30000);
+      if (!tableReady?.ok) {
+        targetResult.errors.push(tableReady?.error || "Search Analytics table did not load");
+      } else {
+        await runInTab(tabId, pageScrollToPerformanceSearchAnalyticsTable, []);
+        await sleep(900);
+        const analytics = await runInTab(tabId, pageExtractPerformanceSearchAnalyticsRows, [target]);
+        targetResult.searchAnalyticsRows = analytics?.rows || [];
+        targetResult.searchAnalyticsHeaders = analytics?.headers || [];
+        targetResult.searchAnalyticsPagination = analytics?.pagination || "";
+        targetResult.searchAnalyticsSortMetric = analytics?.sortMetric || "";
+        targetResult.activeTab = analytics?.activeTab || target.label;
+        if (!targetResult.searchAnalyticsRows.length) targetResult.errors.push(analytics?.error || "No View More rows found");
+      }
+      const screenshotPath = `${folder}/${slugBase}-${safeSlug(target.label)}.png`;
+      await downloadDataUrlFile(screenshotPath, await captureReportScreenshot(tabId));
+      files.push(screenshotPath);
+      targetResult.screenshot = screenshotPath;
+      continue;
+    }
+
+    const ready = target.insightType === "queries"
+      ? await waitForPageCondition(tabId, pageHasPerformanceInsightsQueriesContent, [], 25000)
+      : await waitForPageCondition(tabId, pageHasPerformanceInsightsContent, [], 25000);
     if (!ready?.ok) {
       targetResult.errors.push(ready?.error || "Performance Insights content did not load");
       continue;
@@ -1288,10 +1318,11 @@ async function capturePerformanceInsightsDrilldown(tabId, startUrl, folder, inde
       } else {
         await runInTab(tabId, pageScrollToPerformanceSearchAnalyticsTable, []);
         await sleep(900);
-        const analytics = await runInTab(tabId, pageExtractPerformanceSearchAnalyticsRows, []);
+        const analytics = await runInTab(tabId, pageExtractPerformanceSearchAnalyticsRows, [target]);
         targetResult.searchAnalyticsRows = analytics?.rows || [];
         targetResult.searchAnalyticsHeaders = analytics?.headers || [];
         targetResult.searchAnalyticsPagination = analytics?.pagination || "";
+        targetResult.searchAnalyticsSortMetric = analytics?.sortMetric || "";
         const analyticsScreenshotPath = `${folder}/${slugBase}-${safeSlug(target.label)}-search-analytics.png`;
         await downloadDataUrlFile(analyticsScreenshotPath, await captureReportScreenshot(tabId));
         files.push(analyticsScreenshotPath);
@@ -1315,6 +1346,10 @@ async function capturePerformanceInsightsDrilldown(tabId, startUrl, folder, inde
     ...(target.rows || []).map((row) => {
       const change = [row.direction, row.changePercent, row.clickDelta || row.clicks].filter(Boolean).join(" ");
       return `${target.label}: ${row.title || row.url} ${change}`.trim();
+    }),
+    ...(target.searchAnalyticsRows || []).map((row) => {
+      const change = [row.clickDelta || row.changePercent, row.url].filter(Boolean).join(" ");
+      return `${target.label}: ${row.dimension || row.url || row.values?.[0] || "row"} ${change}`.trim();
     })
   ]).slice(0, 120);
 
@@ -1361,6 +1396,17 @@ function buildPerformanceInsightsTargets(startUrl) {
     url.hash = "dimension-tables";
     return url.toString();
   };
+  const makeViewMoreUrl = (breakdown, sortDirection) => {
+    const url = new URL(`${origin}/performance/search-analytics`);
+    url.searchParams.set("resource_id", resourceId);
+    url.searchParams.set("breakdown", breakdown);
+    url.searchParams.set("num_of_days", "28");
+    url.searchParams.set("compare_date", "PREV");
+    url.searchParams.set("source_view", "insights");
+    url.searchParams.set("lily_sort", sortDirection);
+    url.hash = "dimension-tables";
+    return url.toString();
+  };
   const queryTargets = [
     { label: "Queries - Top", insightType: "queries", queryTab: "TOP", queryTabLabel: "Top" },
     { label: "Queries - Trending up", insightType: "queries", queryTab: "TRENDING_UP", queryTabLabel: "Trending up" },
@@ -1377,7 +1423,19 @@ function buildPerformanceInsightsTargets(startUrl) {
     contentUrl: makeContentUrl(target.timeRange, target.contentTab),
     searchAnalyticsUrl: makeSearchAnalyticsUrl(target.timeRange, target.contentTab)
   }));
-  const targets = [...queryTargets, ...contentTargets];
+  const viewMoreTargets = [
+    { label: "View More - Queries biggest decline", breakdown: "query", sortDirection: "down" },
+    { label: "View More - Pages biggest decline", breakdown: "page", sortDirection: "down" },
+    { label: "View More - Queries biggest growth", breakdown: "query", sortDirection: "up" },
+    { label: "View More - Pages biggest growth", breakdown: "page", sortDirection: "up" }
+  ].map((target) => ({
+    ...target,
+    insightType: "search-analytics-view-more",
+    timeRange: "LAST28DAYS",
+    url: makeViewMoreUrl(target.breakdown, target.sortDirection),
+    searchAnalyticsUrl: makeViewMoreUrl(target.breakdown, target.sortDirection)
+  }));
+  const targets = [...queryTargets, ...viewMoreTargets, ...contentTargets];
   return { resourceId, targets };
 }
 
@@ -1891,9 +1949,15 @@ function pageExtractCwvIssueRows() {
   const pickMatch = (text, re) => clean(text.match(re)?.[0] || text.match(re)?.[1] || "");
   const findIssue = (text) => {
     const source = clean(text);
-    return pickMatch(source, /\b(?:INP|LCP|CLS)\s+issue\b[^,\n。]*/i)
-      || pickMatch(source, /\b(?:INP|LCP|CLS)\b[^,\n。]{0,90}/i)
-      || pickMatch(source, /[^,\n。]{0,40}(?:issue|问题)[^,\n。]{0,90}/i);
+    const issue = pickMatch(source, /\b(?:INP|LCP|CLS)\s+issue\b[^,\n。]*/i);
+    if (issue) return issue;
+    const metricWithThreshold = pickMatch(source, /\b(?:INP|LCP|CLS)\b[^,\n。]{0,80}(?:more than|greater than|over|超过|大于)\s*[\d.]+[^,\n。]*/i);
+    if (metricWithThreshold) return metricWithThreshold;
+    return "";
+  };
+  const isLikelyCwvIssue = (issue, text) => {
+    const joined = `${issue} ${text}`;
+    return /\b(INP|LCP|CLS)\b/i.test(joined) && /issue|more than|greater than|over|超过|大于|问题/i.test(joined);
   };
   const findSeverity = (text) => pickMatch(text, /needs improvement|poor|good|较差|良好|需要改进/i);
   const findValidation = (text) => pickMatch(text, /not started|started|failed|passed|n\/a|未开始|已开始|失败|通过|已通过/i);
@@ -1919,13 +1983,15 @@ function pageExtractCwvIssueRows() {
       const values = rowValues(row);
       const text = clean(values.join(" ") || row.innerText || row.textContent || "");
       const issue = findIssue(text);
-      if (!issue || !/issue|问题|inp|lcp|cls/i.test(issue)) return null;
+      if (!issue || !isLikelyCwvIssue(issue, text)) return null;
+      const href = row.querySelector("a[href]")?.href || row.closest("a[href]")?.href || "";
       return {
         rowIndex: Number(row.getAttribute("data-rowid") || index),
         severity: row.querySelector('[data-label="severity"]') ? cellText(row.querySelector('[data-label="severity"]')) : findSeverity(text) || values[0] || "",
         issue,
         validation: row.querySelector('[data-label="task_status"]') ? cellText(row.querySelector('[data-label="task_status"]')) : findValidation(text),
         urls: row.querySelector('[data-label="URLs"], [data-label="urls"]') ? cellText(row.querySelector('[data-label="URLs"], [data-label="urls"]')) : findUrls(values, text),
+        detailUrl: href && href.startsWith("https://search.google.com/") ? href : "",
         values,
         evidence: text.slice(0, 500)
       };
@@ -1936,7 +2002,7 @@ function pageExtractCwvIssueRows() {
     const lines = (document.body?.innerText || "").split(/\n+/).map(clean).filter(Boolean);
     lines.forEach((line, index) => {
       const issue = findIssue(line);
-      if (!issue) return;
+      if (!issue || !isLikelyCwvIssue(issue, line)) return;
       const context = clean(lines.slice(Math.max(0, index - 2), index + 5).join(" "));
       rows.push({
         rowIndex: index,
@@ -1995,24 +2061,45 @@ function pageExtractCwvIssueRows() {
   return { ok: deduped.length > 0, rows: deduped, snapshot, url: location.href, error: deduped.length ? "" : "No issue rows found; exported DOM/text snapshot for fallback analysis" };
 }
 
-function pageClickCwvIssueRow(issueText, rowIndex) {
+function pageClickCwvIssueRow(issueText, rowIndex, issue = {}) {
   const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const normalizeIssue = (value) => clean(value)
+    .toLowerCase()
+    .replace(/\((desktop|mobile)\)/g, "")
+    .replace(/[^\w.\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const metricOf = (value) => clean(value).match(/\b(INP|LCP|CLS)\b/i)?.[1]?.toUpperCase() || "";
+  const thresholdOf = (value) => clean(value).match(/\b(?:more than|greater than|over|超过|大于)\s*([\d.]+)/i)?.[1] || "";
   const rows = Array.from(document.querySelectorAll("tbody tr, [role='row'], [data-rowid], .nJ0sOc, .ptEsvc, .SmR8")).filter(visible);
-  const wanted = clean(issueText).toLowerCase();
+  const wanted = normalizeIssue(issueText);
+  const wantedMetric = metricOf(`${issueText} ${issue?.evidence || ""}`);
+  const wantedThreshold = thresholdOf(`${issueText} ${issue?.evidence || ""}`);
+  const debug = [];
   let row = rows.find((candidate) => {
     const issueCell = candidate.querySelector('[data-label="issue"]');
     const text = clean(issueCell?.getAttribute("data-string-value") || issueCell?.innerText || candidate.innerText || candidate.textContent || "");
-    return text && (text.toLowerCase() === wanted || text.toLowerCase().includes(wanted));
+    const normalized = normalizeIssue(text);
+    if (debug.length < 8 && text) debug.push(text.slice(0, 220));
+    if (!normalized || !/\b(inp|lcp|cls)\b/i.test(normalized)) return false;
+    if (normalized === wanted || normalized.includes(wanted) || wanted.includes(normalized)) return true;
+    const candidateMetric = metricOf(text);
+    const candidateThreshold = thresholdOf(text);
+    if (wantedMetric && candidateMetric === wantedMetric) {
+      if (!wantedThreshold || !candidateThreshold || wantedThreshold === candidateThreshold) return true;
+    }
+    return false;
   });
-  if (!row) {
+  if (!row && issue?.source !== "text-fallback") {
     row = rows.find((candidate, index) => Number(candidate.getAttribute("data-rowid") || index) === Number(rowIndex));
   }
-  if (!row) return { ok: false, error: `Issue row not found: ${issueText}` };
+  if (!row) return { ok: false, error: `Issue row not found: ${issueText}`, debug };
   row.scrollIntoView({ block: "center", inline: "center" });
-  row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-  row.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-  row.click();
+  const target = row.querySelector('a[href], button, [role="button"]') || row;
+  target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+  target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+  target.click();
   return { ok: true, issue: issueText };
 }
 
@@ -2482,6 +2569,24 @@ function pageScrollToPerformanceSearchAnalyticsTable() {
 
 function pageExtractPerformanceSearchAnalyticsRows(target = {}) {
   const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+  const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const parseCompactNumber = (value) => {
+    const raw = clean(value).replace(/[−–—]/g, "-").replace(/^\((.+)\)$/, "-$1");
+    if (!raw || !/[-+]?\d/.test(raw)) return NaN;
+    const unitMatch = raw.match(/([-+]?\s*\d+(?:[,.]\d+)*(?:\.\d+)?)\s*([KMB万億亿])?/i);
+    if (!unitMatch) return NaN;
+    const unit = (unitMatch[2] || "").toLowerCase();
+    let number = Number(unitMatch[1].replace(/\s+/g, "").replace(/,/g, ""));
+    if (!Number.isFinite(number)) return NaN;
+    if (unit === "k") number *= 1000;
+    else if (unit === "m") number *= 1000000;
+    else if (unit === "b") number *= 1000000000;
+    else if (unit === "万") number *= 10000;
+    else if (unit === "亿" || unit === "億") number *= 100000000;
+    return number;
+  };
+  const isSignedNumber = (value) => /^[+\-−–—]\s*\d/.test(clean(value));
+  const isPercent = (value) => /%/.test(clean(value));
   const cleanCell = (cell) => {
     const raw = clean(cell.getAttribute("data-string-value") || cell.getAttribute("data-numeric-value") || cell.innerText || cell.textContent || "");
     if (!/https?:\/\//i.test(raw)) return raw;
@@ -2490,20 +2595,76 @@ function pageExtractPerformanceSearchAnalyticsRows(target = {}) {
     return match ? match[0] : compact;
   };
   const extractTable = (table) => {
-    const headers = Array.from(table.querySelectorAll("thead th, tr th")).map((th) => clean(th.innerText || th.textContent || th.getAttribute("data-name") || th.getAttribute("data-label")));
-    const bodyRows = Array.from(table.querySelectorAll("tbody tr")).filter((row) => row.querySelectorAll("td").length);
-    const values = bodyRows.map((row) => Array.from(row.querySelectorAll("td")).map(cleanCell)).filter((row) => row.some(Boolean));
+    const headerCells = table.querySelectorAll("thead th, thead td").length
+      ? Array.from(table.querySelectorAll("thead th, thead td"))
+      : Array.from(table.querySelectorAll("tr:first-child th, tr:first-child td"));
+    const headers = headerCells.map((th) => clean(th.innerText || th.textContent || th.getAttribute("data-name") || th.getAttribute("data-label"))).filter(Boolean);
+    const bodyRows = Array.from(table.querySelectorAll("tbody tr")).filter((row) => row.querySelectorAll("td, th").length);
+    const values = bodyRows.map((row) => Array.from(row.querySelectorAll("th, td")).map(cleanCell)).filter((row) => row.some(Boolean));
     return { headers, values, text: clean(table.innerText || "") };
   };
   const tables = Array.from(document.querySelectorAll("table")).map(extractTable);
   const selected = tables.find((table) => /clicks|impressions|ctr|position|点击次数|展示次数|平均排名/i.test(`${table.headers.join(" ")} ${table.text}`) && table.values.length)
     || tables.find((table) => table.values.length);
-  if (!selected) return { ok: false, error: "Search Analytics table not found", url: location.href, rows: [] };
-  const headers = selected.headers.length ? selected.headers : ["Page", "Clicks"];
-  const rows = selected.values.map((values) => {
+  const virtualValues = !selected ? Array.from(document.querySelectorAll("[role='row'], [data-rowid], .nJ0sOc, .ptEsvc, .SmR8"))
+    .filter(visible)
+    .map((row) => {
+      const cells = Array.from(row.querySelectorAll("[role='cell'], td, th, [data-label]")).filter(visible);
+      const values = (cells.length ? cells : Array.from(row.children || []).filter(visible))
+        .map(cleanCell)
+        .filter(Boolean);
+      return Array.from(new Set(values));
+    })
+    .filter((values) => values.length >= 2 && values.join(" ").length <= 1800 && /\d/.test(values.join(" ")))
+    .slice(0, 200) : [];
+  const fallbackSelected = selected || (virtualValues.length ? {
+    headers: [target?.breakdown === "query" ? "Query" : "Page", "Clicks", "Impressions", "CTR", "Position"],
+    values: virtualValues,
+    text: "Virtual DOM fallback"
+  } : null);
+  if (!fallbackSelected) return { ok: false, error: "Search Analytics table not found", url: location.href, rows: [] };
+  const headers = fallbackSelected.headers.length ? fallbackSelected.headers : ["Page", "Clicks"];
+  const headerNorms = headers.map((header) => header.toLowerCase());
+  const clicksIndex = headerNorms.findIndex((header) => /clicks|点击/.test(header));
+  const explicitDeltaIndex = headerNorms.findIndex((header, index) => {
+    const afterClicks = clicksIndex < 0 || index > clicksIndex;
+    return afterClicks && /difference|diff|change|delta|变化|差异|涨跌/.test(header);
+  });
+  const inferClickDelta = (values) => {
+    const signedIndex = values.findIndex((value, index) => index > 0 && isSignedNumber(value) && !isPercent(value));
+    const index = explicitDeltaIndex >= 0 && values[explicitDeltaIndex] ? explicitDeltaIndex : signedIndex;
+    const value = index >= 0 ? values[index] : "";
+    return {
+      index,
+      value,
+      number: parseCompactNumber(value)
+    };
+  };
+  const inferChangePercent = (values) => values.find((value, index) => index > 0 && isPercent(value) && /[-+]?\d/.test(value)) || "";
+  let rows = fallbackSelected.values.map((values) => {
     const url = values.find((value) => /^https?:\/\//i.test(value)) || "";
-    return { url, dimension: values[0] || "", values };
-  }).filter((row) => row.url || row.values.some(Boolean)).slice(0, 200);
+    const delta = inferClickDelta(values);
+    const changePercent = inferChangePercent(values);
+    return {
+      url,
+      dimension: values[0] || "",
+      values,
+      clickDelta: delta.value,
+      clickDeltaNumber: Number.isFinite(delta.number) ? delta.number : null,
+      changePercent,
+      sortValue: Number.isFinite(delta.number) ? delta.number : null
+    };
+  }).filter((row) => row.url || row.values.some(Boolean));
+  if (target?.sortDirection && rows.some((row) => Number.isFinite(row.sortValue))) {
+    const directionRows = rows.filter((row) => Number.isFinite(row.sortValue) && (target.sortDirection === "down" ? row.sortValue < 0 : row.sortValue > 0));
+    rows = (directionRows.length ? directionRows : rows)
+      .sort((a, b) => {
+        const aValue = Number.isFinite(a.sortValue) ? a.sortValue : (target.sortDirection === "down" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
+        const bValue = Number.isFinite(b.sortValue) ? b.sortValue : (target.sortDirection === "down" ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
+        return target.sortDirection === "down" ? aValue - bValue : bValue - aValue;
+      });
+  }
+  rows = rows.slice(0, 200);
   const activeTab = Array.from(document.querySelectorAll('[aria-selected="true"], [role="tab"], a, button'))
     .map((el) => clean(el.innerText || el.textContent || el.getAttribute("aria-label") || ""))
     .find((label) => {
@@ -2513,7 +2674,18 @@ function pageExtractPerformanceSearchAnalyticsRows(target = {}) {
   const pagination = Array.from(document.querySelectorAll("div, span"))
     .map((el) => clean(el.innerText || el.textContent || ""))
     .find((value) => /^\d+\s*-\s*\d+\s+of\s+\d+$/i.test(value) || /^\d+\s*-\s*\d+\s*\/\s*\d+$/i.test(value)) || "";
-  return { ok: rows.length > 0, url: location.href, headers, rows, activeTab, pagination, error: rows.length ? "" : "No Search Analytics rows found" };
+  return {
+    ok: rows.length > 0,
+    url: location.href,
+    headers,
+    rows,
+    activeTab,
+    pagination,
+    breakdown: target?.breakdown || "",
+    sortDirection: target?.sortDirection || "",
+    sortMetric: clicksIndex >= 0 ? "clicks_delta" : "",
+    error: rows.length ? "" : "No Search Analytics rows found"
+  };
 }
 
 async function runInTab(tabId, func, args = []) {
@@ -2657,6 +2829,12 @@ function buildCoreWebVitalsMarkdown(report) {
       if (issue.detailScreenshot) lines.push(`Screenshot: ./${issue.detailScreenshot.split("/").pop()}`);
       if (issue.pagination) lines.push(`Pagination: ${issue.pagination}`);
       if (issue.error) lines.push(`Error: ${issue.error}`);
+      if (issue.evidence) {
+        lines.push("", "Issue row evidence:", "", "```text", issue.evidence.slice(0, 800), "```");
+      }
+      if (issue.clickDebug?.length) {
+        lines.push("", "Click matching debug rows:", "", "```text", issue.clickDebug.slice(0, 8).join("\n---\n"), "```");
+      }
       lines.push("");
 
       const headers = issue.urlGroupHeaders?.length ? issue.urlGroupHeaders : ["Example URL", "Group population", issue.metricColumn || "Metric"];
@@ -2741,6 +2919,29 @@ function buildPerformanceInsightsMarkdown(report) {
     if (target.errors?.length) lines.push("Errors:", ...target.errors.map((error) => `- ${error}`));
     lines.push("");
 
+    if (target.insightType === "search-analytics-view-more") {
+      lines.push("### View More Search Analytics", "");
+      lines.push(`Breakdown: ${target.breakdown || "-"}`);
+      lines.push(`Sort: ${target.sortDirection === "down" ? "biggest click decline first" : "biggest click growth first"}`);
+      if (target.searchAnalyticsSortMetric) lines.push(`Sort metric: ${target.searchAnalyticsSortMetric}`);
+      if (target.searchAnalyticsPagination) lines.push(`Pagination: ${target.searchAnalyticsPagination}`);
+      lines.push("");
+      const baseHeaders = target.searchAnalyticsHeaders?.length ? target.searchAnalyticsHeaders : [target.breakdown === "query" ? "Query" : "Page", "Clicks"];
+      const hasDeltaHeader = baseHeaders.some((header) => /difference|diff|change|delta|变化|差异|涨跌/i.test(header));
+      const headers = !hasDeltaHeader && (target.searchAnalyticsRows || []).some((row) => row.clickDelta)
+        ? [...baseHeaders, "Click delta"]
+        : baseHeaders;
+      lines.push(`| ${headers.map(escapeTable).join(" | ")} |`);
+      lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
+      for (const row of target.searchAnalyticsRows || []) {
+        const values = headers.map((_, index) => index < baseHeaders.length ? row.values?.[index] || "" : row.clickDelta || "");
+        lines.push(`| ${values.map(escapeTable).join(" | ")} |`);
+      }
+      if (!target.searchAnalyticsRows?.length) lines.push(`| ${headers.map(() => "-").join(" | ")} |`);
+      lines.push("");
+      continue;
+    }
+
     if (target.queryRows?.length) {
       lines.push("### Queries Leading To Your Site", "");
       lines.push("| Query | Similar query group | Direction | Change | Clicks |");
@@ -2763,11 +2964,15 @@ function buildPerformanceInsightsMarkdown(report) {
       lines.push("### Search Analytics Page Breakdown", "");
       if (target.searchAnalyticsScreenshot) lines.push(`Screenshot: ./${target.searchAnalyticsScreenshot.split("/").pop()}`, "");
       if (target.searchAnalyticsPagination) lines.push(`Pagination: ${target.searchAnalyticsPagination}`, "");
-      const headers = target.searchAnalyticsHeaders?.length ? target.searchAnalyticsHeaders : ["Page", "Clicks"];
+      const baseHeaders = target.searchAnalyticsHeaders?.length ? target.searchAnalyticsHeaders : ["Page", "Clicks"];
+      const hasDeltaHeader = baseHeaders.some((header) => /difference|diff|change|delta|变化|差异|涨跌/i.test(header));
+      const headers = !hasDeltaHeader && (target.searchAnalyticsRows || []).some((row) => row.clickDelta)
+        ? [...baseHeaders, "Click delta"]
+        : baseHeaders;
       lines.push(`| ${headers.map(escapeTable).join(" | ")} |`);
       lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
       for (const row of target.searchAnalyticsRows || []) {
-        const values = headers.map((_, index) => row.values?.[index] || "");
+        const values = headers.map((_, index) => index < baseHeaders.length ? row.values?.[index] || "" : row.clickDelta || "");
         lines.push(`| ${values.map(escapeTable).join(" | ")} |`);
       }
       lines.push("");
@@ -2881,8 +3086,13 @@ function slimGscReportJobForAi(job) {
         targets: (page.performanceInsights.targets || []).map((target) => ({
           label: target.label,
           insightType: target.insightType,
+          breakdown: target.breakdown || "",
+          sortDirection: target.sortDirection || "",
           queryRows: slimRows(target.queryRows, 40),
           rows: slimRows(target.rows, 40),
+          searchAnalyticsHeaders: target.searchAnalyticsHeaders || [],
+          searchAnalyticsPagination: target.searchAnalyticsPagination || "",
+          searchAnalyticsSortMetric: target.searchAnalyticsSortMetric || "",
           searchAnalyticsRows: slimRows(target.searchAnalyticsRows, 40),
           errors: target.errors || []
         })),
@@ -2942,6 +3152,16 @@ function buildLocalGscActionPlan(job) {
         const upQueries = (target.queryRows || []).filter((row) => /up/i.test(row.direction || "")).slice(0, 3);
         if (upQueries.length) {
           add("Content expansion", "Medium", page.title, `放大上升查询：${upQueries.map((row) => row.query).join(", ")}。补专题页、比较页或模板页承接新增需求。`, target.label);
+        }
+        if (target.insightType === "search-analytics-view-more") {
+          const rows = (target.searchAnalyticsRows || []).slice(0, 5);
+          const evidence = rows.map((row) => `${row.dimension || row.url || row.values?.[0] || "row"} ${row.clickDelta || ""}`.trim()).join("; ");
+          if (rows.length && target.sortDirection === "down") {
+            add("SEO growth", "High", page.title, `优先补救 View More 下降${target.breakdown === "query" ? "关键词" : "页面"}：检查搜索意图漂移、标题 CTR、内容新鲜度、内链入口和转化路径。`, evidence || target.label);
+          }
+          if (rows.length && target.sortDirection === "up") {
+            add("Content expansion", "Medium", page.title, `放大 View More 上升${target.breakdown === "query" ? "关键词" : "页面"}：把上涨需求扩展成相关专题、FAQ、对比页或高转化模板页。`, evidence || target.label);
+          }
         }
       }
     }
@@ -3011,7 +3231,7 @@ function buildGscCoverageRows(job) {
   const pages = job.pages || [];
   const hasTitle = (pattern) => pages.some((page) => pattern.test(`${page.title} ${page.url}`));
   return [
-    { area: "Demand and CTR", coverage: hasTitle(/Search Results Performance|Performance Insights/i) ? "Search Analytics dimensions + Insights queries/content" : "Missing or not loaded", why: "找高展示低点击词、上涨需求、下降查询和自然入口页。" },
+    { area: "Demand and CTR", coverage: hasTitle(/Search Results Performance|Performance Insights/i) ? "Search Analytics dimensions + Insights queries/content + View More growth/decline drilldowns" : "Missing or not loaded", why: "找高展示低点击词、上涨需求、下降查询和自然入口页。" },
     { area: "Indexing", coverage: hasTitle(/Page Indexing/i) ? "Page Indexing reasons + examples" : "Missing or not loaded", why: "未索引页面无法贡献 SEO 流量，examples 可直接给工程排查。" },
     { area: "Page quality", coverage: hasTitle(/Core Web Vitals/i) ? "Core Web Vitals device issues + URL groups" : "Missing or not loaded", why: "INP/LCP/CLS 影响体验、转化和搜索质量信号。" },
     { area: "Structured data", coverage: hasTitle(/Product|Merchant|Breadcrumb|FAQ|Review|Logo|Organization|Profile|Discussion|Video|Events|Courses|Software|Dataset/i) ? "Rich result reports captured where available" : "Missing or no eligible reports discovered", why: "富结果影响 SERP 可见度、信任感和点击率。" },
