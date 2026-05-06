@@ -78,10 +78,10 @@ function wireActions() {
 
   els.btnExportMarkdown.addEventListener("click", async () => {
     if (!analysis) return toast("请先分析页面");
-    toast(settings.aiEnabled ? "AI 正在整理 Markdown…" : "正在导出 Markdown…");
+    toast(settings.aiEnabled ? "AI 正在整理复刻 brief…" : "正在导出复刻 brief…");
     const res = await chrome.runtime.sendMessage({ type: "LR_EXPORT_MARKDOWN", analysis });
     if (!res?.ok) toast(res?.error || "导出失败");
-    else toast(res.aiUsed ? "已导出 AI Markdown" : "已导出 Markdown");
+    else toast(res.aiUsed ? "已导出 AI 复刻 Brief" : "已导出复刻 Brief");
   });
 
   els.btnExportCsv.addEventListener("click", async () => {
@@ -694,10 +694,10 @@ function renderSeo() {
 
     <div class="card">
       <h3>Markdown 页面复刻</h3>
-      <div class="muted">导出会包含 SEO、SERP、关键词密度、转化元素、视觉风格、图片和页面 HTML 层级。启用 AI 后会先整理成高质量复刻 brief，失败则回退本地版本。</div>
+      <div class="muted">导出会按当前网页所见即所得视口、Section 顺序和 HTML 骨架整理复刻 brief，同时保留 SEO、SERP、关键词密度、转化元素、视觉风格、图片和组件清单。启用 AI 后会先重写为高质量页面还原 brief，失败则回退本地版本。</div>
       <div class="row" style="margin-top:10px;">
-        <button id="btnCopyMarkdown" class="btn btn-primary">Copy AI Markdown</button>
-        <button id="btnDownloadMarkdown" class="btn btn-ghost">Export AI Markdown</button>
+        <button id="btnCopyMarkdown" class="btn btn-primary">复制复刻 Brief</button>
+        <button id="btnDownloadMarkdown" class="btn btn-ghost">导出复刻 Brief</button>
       </div>
     </div>
   `;
@@ -707,18 +707,18 @@ function renderSeo() {
   }
   document.getElementById("btnCopyMarkdown")?.addEventListener("click", async () => {
     if (!analysis) return toast("请先分析页面");
-    toast(settings.aiEnabled ? "AI 正在整理 Markdown…" : "正在生成 Markdown…");
+    toast(settings.aiEnabled ? "AI 正在整理复刻 brief…" : "正在生成复刻 brief…");
     const res = await chrome.runtime.sendMessage({ type: "LR_BUILD_MARKDOWN", analysis });
     if (!res?.ok || !res.markdown) return toast(res?.error || "暂无 Markdown");
     await navigator.clipboard.writeText(res.markdown);
-    toast(res.aiUsed ? "已复制 AI Markdown" : "已复制 Markdown");
+    toast(res.aiUsed ? "已复制 AI 复刻 Brief" : "已复制复刻 Brief");
   });
   document.getElementById("btnDownloadMarkdown")?.addEventListener("click", async () => {
     if (!analysis) return toast("请先分析页面");
-    toast(settings.aiEnabled ? "AI 正在整理 Markdown…" : "正在导出 Markdown…");
+    toast(settings.aiEnabled ? "AI 正在整理复刻 brief…" : "正在导出复刻 brief…");
     const res = await chrome.runtime.sendMessage({ type: "LR_EXPORT_MARKDOWN", analysis });
     if (!res?.ok) toast(res?.error || "导出失败");
-    else toast(res.aiUsed ? "已导出 AI Markdown" : "已导出 Markdown");
+    else toast(res.aiUsed ? "已导出 AI 复刻 Brief" : "已导出复刻 Brief");
   });
 }
 

@@ -573,7 +573,10 @@ function slimAnalysisForAi(analysis, { includePageBrief = false, linkLimit = 30 
       images: pageBrief.images,
       visualStyle: pageBrief.visualStyle,
       sectionTree: pageBrief.sectionTree,
-      structure: pageBrief.structure
+      structure: pageBrief.structure,
+      htmlSkeleton: pageBrief.htmlSkeleton,
+      viewportSnapshot: pageBrief.viewportSnapshot,
+      componentInventory: pageBrief.componentInventory
     };
   }
   return slim;
